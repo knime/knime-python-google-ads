@@ -1,0 +1,8 @@
+channels:
+  - knime
+  - conda-forge
+dependencies:
+  - python=3.11
+  - knime-python-base=5.1
+  - knime-extension
+  - google-ads 
