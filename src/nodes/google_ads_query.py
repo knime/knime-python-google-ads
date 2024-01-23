@@ -65,7 +65,7 @@ LOGGER = logging.getLogger(__name__)
 @knext.node(
     name="Google Ads Query",
     node_type=knext.NodeType.MANIPULATOR,
-    icon_path="icons/gads-icon.png",
+    icon_path="icons/google_ads_query_logo.png",
     category=google_ads_ext.main_category,
 )
 @knext.input_port(
