@@ -81,26 +81,25 @@ class GoogleAdsQuery:
     Can be multiple lines.
     """
 
-    query = knext.StringParameter(
-        label="Input your query here",
+    query = knext.MultilineStringParameter(
+        label="Query",
         description="Build your query using [Google Ads Query Builder](https://developers.google.com/google-ads/api/fields/v12/overview_query_builder), then validate it with [Google Ads Query Validator](https://developers.google.com/google-ads/api/fields/v12/query_validator) for desired results.",
         default_value="",
+        number_of_lines = 10,
     )
 
     def configure(self, configure_context, spec: GoogleAdObjectSpec):
         # TODO Check and throw config error maybe if spec.customer_id is not a string or does not have a specific format
         pass
 
-    def execute(self, exec_context, port_obect: GoogleAdConnectionObject):
+    def execute(self, exec_context, port_object: GoogleAdConnectionObject):
         client: GoogleAdsClient
-        client = port_obect.client
-        customer_id = port_obect.spec.customer_id
+        client = port_object.client
+        customer_id = port_object.spec.customer_id
 
         ####################
         # [START QUERY TEST]
         ####################
-        # TODO Ensure basic query functionality works
-        # TODO Implement getting query input as multiline string
         # TODO Implement config window with a query builder
         DEFAULT_QUERY = """
         SELECT
@@ -111,7 +110,8 @@ class GoogleAdsQuery:
             metrics.cost_micros
         FROM campaign"""
 
-        if self.query == None:
+        if self.query == "":
+            LOGGER.warning("Using default query")
             self.query = DEFAULT_QUERY
 
         ga_service: GoogleAdsServiceClient
@@ -122,6 +122,7 @@ class GoogleAdsQuery:
         search_request.query = self.query
         LOGGER.warning("Setting query done.")
 
+        df = pd.DataFrame()
         try:
             response_stream = ga_service.search_stream(search_request)
             data = []

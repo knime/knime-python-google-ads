@@ -51,20 +51,25 @@ LOGGER = logging.getLogger(__name__)
 
 
 class GoogleAdObjectSpec(knext.PortObjectSpec):
-    def __init__(self, customer_id: str) -> None:
+    def __init__(self, customer_id: str, campaign_ids: list[str]) -> None:
         super().__init__()
         self._customer_id = customer_id
+        self._campaign_ids = campaign_ids
 
     @property
     def customer_id(self) -> str:
         return self._customer_id
+    
+    @property
+    def campaign_ids(self) -> list[str]:
+        return self._campaign_ids
 
     def serialize(self) -> dict:
-        return {"customer_id": self._customer_id}
+        return {"customer_id": self._customer_id, "campaign_ids": self._campaign_ids}
 
     @classmethod
     def deserialize(cls, data: dict) -> "GoogleAdObjectSpec":
-        return cls(data["customer_id"])
+        return cls(data["customer_id"], data["campaign_ids"])
 
 
 #
