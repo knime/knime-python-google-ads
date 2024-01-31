@@ -52,12 +52,12 @@ from util.common import (
     GoogleAdConnectionObject,
     google_ad_port_type,
 )
-from google.ads.googleads.v14.services.services.google_ads_service.client import (
+from google.ads.googleads.v15.services.services.google_ads_service.client import (
     GoogleAdsServiceClient,
 )
 from google.ads.googleads.errors import GoogleAdsException
 
-from google.ads.googleads.v14.services.types.google_ads_service import GoogleAdsRow
+from google.ads.googleads.v15.services.types.google_ads_service import GoogleAdsRow
 
 LOGGER = logging.getLogger(__name__)
 
@@ -84,18 +84,30 @@ class GoogleAdsQuery:
     query = knext.MultilineStringParameter(
         label="Query",
         description="Build your query using [Google Ads Query Builder](https://developers.google.com/google-ads/api/fields/v12/overview_query_builder), then validate it with [Google Ads Query Validator](https://developers.google.com/google-ads/api/fields/v12/query_validator) for desired results.",
-        default_value="",
+        default_value="""SELECT
+            campaign.id,
+            campaign.name,
+            metrics.impressions,
+            metrics.clicks,
+            metrics.cost_micros
+        FROM campaign""",
         number_of_lines = 10,
     )
 
-    def configure(self, configure_context, spec: GoogleAdObjectSpec):
+    def configure(self, configuration_context, spec: GoogleAdObjectSpec):
         # TODO Check and throw config error maybe if spec.customer_id is not a string or does not have a specific format
-        pass
+        if hasattr(spec, "customer_id") == False:
+            raise knext.InvalidParametersError("Connect to the Google Ads Connector node.")
+        pass #Which configuration I need to pass?? explain better the configure method, not 100% clear. 
 
     def execute(self, exec_context, port_object: GoogleAdConnectionObject):
+        if port_object != GoogleAdConnectionObject:
+            raise knext.InvalidParametersError("cosa stai faccendo!!!")
+
         client: GoogleAdsClient
         client = port_object.client
         customer_id = port_object.spec.customer_id
+        
 
         ####################
         # [START QUERY TEST]
@@ -149,7 +161,7 @@ class GoogleAdsQuery:
             LOGGER.warning(
                 "Google Ads API request failed. Please check your query and credentials."
             )
-            LOGGER.warning(ex)
+            LOGGER.warning(ex.error)
         ##################
         # [END QUERY TEST]
         ##################
