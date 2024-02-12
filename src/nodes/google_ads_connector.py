@@ -322,7 +322,7 @@ class GoogleAdsConnector:
         )
         return port_object
 
-
+#comment
 def test_connection(client: GoogleAdsClient):
     # TODO Implement
     #     1. Check whether client can access API, else throw error
