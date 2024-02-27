@@ -67,7 +67,7 @@ from google.ads.googleads.errors import GoogleAdsException
 
 LOGGER = logging.getLogger(__name__)
 
-
+"""
 class DeveloperTokenRetrieval(knext.EnumParameterOptions):
     MANUALLY = (
         "Manual",
@@ -75,7 +75,7 @@ class DeveloperTokenRetrieval(knext.EnumParameterOptions):
     )
     CREDENTIALS = (
         "Credentials",
-        "Reads the developer  token from the credentials configuration node.",
+        "Reads the developer token from the credentials configuration node.",
     )
 
 
@@ -111,10 +111,10 @@ def manager_customer_ids(ctx: knext.DialogCreationContext):
 
 
 def retrieve_customer_ids(ctx: knext.DialogCreationContext) -> list[str]:
-    query = """
+    query = """"""
     SELECT 
         customer_client.id
-    FROM customer_client """
+    FROM customer_client """"""
 
     # Accessing access token from input credential port via DialogCreationContext
     specs = ctx.get_input_specs()
@@ -208,7 +208,7 @@ class GAdsconnectorLoaderInputSettings:
 @knext.parameter_group(label="")
 class GAdsconnectorLoaderCustomerIDs:
     customer_id_retrieval = _create_specific_customer_ids_list()
-
+"""
 
 @knext.node(
     name="Google Ads Connector",
@@ -232,7 +232,7 @@ class GoogleAdsConnector:
     Long description of the node.
     Can be multiple lines.
     """
-
+    """
     dev_token_retrieval = knext.EnumParameter(
         "Connection method",
         "Input the necessary parameters to stablish a connection manually or using a Credentials Configuration node.",
@@ -242,34 +242,26 @@ class GoogleAdsConnector:
     )
 
     LOGGER.warning(f"testing a warning here {dev_token_retrieval}")
-
+    """
     developer_token = knext.StringParameter(
         label="Developer Token",
         description="The Google developer token is needed to connect to the Google Ads API. It can be obtained following [this docucmentation](https://developers.google.com/google-ads/api/docs/get-started/dev-token?hl=en).",
         default_value="",
-    ).rule(
-        knext.OneOf(dev_token_retrieval, [DeveloperTokenRetrieval.MANUALLY.name]),
-        knext.Effect.SHOW,
-    )
+    )#.rule(knext.OneOf(dev_token_retrieval, [DeveloperTokenRetrieval.MANUALLY.name]),knext.Effect.SHOW,)
 
     login_customer_id = knext.StringParameter(
         label="Manager Customer Id",
         description="The login-customer-id is equivalent to choosing an account in the Google Ads UI after signing in or clicking on your profile image at the top right.",
         default_value="",
-    ).rule(
-        knext.OneOf(dev_token_retrieval, [DeveloperTokenRetrieval.MANUALLY.name]),
-        knext.Effect.SHOW,
-    )
+    )#.rule(knext.OneOf(dev_token_retrieval, [DeveloperTokenRetrieval.MANUALLY.name]),knext.Effect.SHOW,)
 
     customer_id = knext.StringParameter(
         label="Account Id",
         description="The account id of your target campaigns.",
         default_value="",
-    ).rule(
-        knext.OneOf(dev_token_retrieval, [DeveloperTokenRetrieval.MANUALLY.name]),
-        knext.Effect.SHOW,
-    )
+    )#.rule(knext.OneOf(dev_token_retrieval, [DeveloperTokenRetrieval.MANUALLY.name]),knext.Effect.SHOW,)
 
+    """
     input_settings = GAdsconnectorLoaderInputSettings().rule(
         knext.OneOf(dev_token_retrieval, [DeveloperTokenRetrieval.CREDENTIALS.name]),
         knext.Effect.SHOW,
@@ -281,7 +273,7 @@ class GoogleAdsConnector:
         and knext.OneOf(dev_token_retrieval, [DeveloperTokenRetrieval.MANUALLY.name]),
         knext.Effect.HIDE,
     )
-
+    """
     def configure(
         self,
         configuration_context: knext.ConfigurationContext,
@@ -295,14 +287,17 @@ class GoogleAdsConnector:
         # Combine credentials with customer ID
         # Use the access token provided in the input port. The token gets automatically refreshed by the upstream Google Authenticator node.
         credentials = Credentials(token=str(credential.spec.auth_parameters))
+        LOGGER.warning(f"access_token: {credential.spec.auth_parameters}")
         LOGGER.warning("auth_parameter")
         LOGGER.warning(dir(credential.spec))
+        LOGGER.warning(f"What developer token I am passing here {self.developer_token}")
 
         client = GoogleAdsClient(
             credentials=credentials,
             developer_token=self.developer_token,
             login_customer_id=self.login_customer_id,
         )
+        LOGGER.warning(f" GoogleAdsClient object: {dir(client)}")
 
         campaign_ids = get_campaigns_id(client, self.customer_id)
         # customer_ids = get_customer_id(client)
@@ -322,7 +317,7 @@ class GoogleAdsConnector:
         )
         return port_object
 
-#comment
+
 def test_connection(client: GoogleAdsClient):
     # TODO Implement
     #     1. Check whether client can access API, else throw error

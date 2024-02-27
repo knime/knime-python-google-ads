@@ -165,6 +165,8 @@ class GoogleAdsQuery:
         enum= HardCodedQueries,
         ).rule(knext.OneOf(query_mode, [QueryBuilderMode.PREBUILT.name]),knext.Effect.SHOW,)
     
+
+    #TODO move the pre-built queries to a separte file in the util folder pre-built_ad_queries.py
     prebuilt_query_campaigns = """
                         SELECT campaign.name,
                             campaign_budget.amount_micros,
@@ -327,6 +329,8 @@ class GoogleAdsQuery:
         ####################
         # TODO Implement config window with a query builder
         execution_query = self.define_query()
+        
+        #TODO move the pre-built queries to a separte file in the util folder pre-built_ad_queries.py
         DEFAULT_QUERY = """
         SELECT
             campaign.id,
@@ -349,6 +353,7 @@ class GoogleAdsQuery:
         
 
         df = pd.DataFrame()
+        #TODO add configuration for timeout (find default timeout and use it.)
         try:
             response_stream = ga_service.search_stream(search_request)
             data = []
