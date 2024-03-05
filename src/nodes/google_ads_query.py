@@ -52,6 +52,7 @@ from util.common import (
     GoogleAdConnectionObject,
     google_ad_port_type,
 )
+import util.pre_built_ad_queries as pb_queries
 from google.ads.googleads.v15.services.services.google_ads_service.client import (
     GoogleAdsServiceClient,
 )
@@ -166,6 +167,26 @@ class GoogleAdsQuery:
         enum= HardCodedQueries,
         ).rule(knext.OneOf(query_mode, [QueryBuilderMode.PREBUILT.name]),knext.Effect.SHOW,)
     
+    date_start_query = knext.DateTimeParameter(
+        label="Start date",
+        description="Define the start date for the selected pre-built query.",
+        is_advanced=False,
+        show_date=True,
+        show_time=False,
+        show_seconds=False,
+        show_milliseconds=False,
+    ).rule(knext.OneOf(query_mode, [QueryBuilderMode.PREBUILT.name]),knext.Effect.SHOW,)
+
+    date_end_query = knext.DateTimeParameter(
+        label="End date",
+        description="End date for the selected pre-built query",
+        is_advanced=False,
+        show_date=True,
+        show_time=False,
+        show_seconds=False,
+        show_milliseconds=False,
+    ).rule(knext.OneOf(query_mode, [QueryBuilderMode.PREBUILT.name]),knext.Effect.SHOW,)
+    
     custom_timeout = knext.IntParameter(
         label= "Timeout (seconds)",
         description= "When making a request, you can set a \"timeout\" parameter to specify a client-side response deadline in seconds. If you don't set it, the default timeout for the Google Ads API SearchStream method is five minutes.",
@@ -176,147 +197,7 @@ class GoogleAdsQuery:
     
 
     #TODO move the pre-built queries to a separte file in the util folder pre-built_ad_queries.py
-    prebuilt_query_campaigns = """
-                        SELECT campaign.name,
-                            campaign_budget.amount_micros,
-                            campaign.status,
-                            campaign.optimization_score,
-                            campaign.advertising_channel_type,
-                            metrics.clicks,
-                            metrics.impressions,
-                            metrics.ctr,
-                            metrics.average_cpc,
-                            metrics.cost_micros,
-                            campaign.bidding_strategy_type
-                        FROM campaign
-                        WHERE segments.date DURING LAST_7_DAYS
-                        AND campaign.status != 'REMOVED'
-                        """  
-    prebuilt_query_adgroups ="""
-                        SELECT ad_group.name,
-                            campaign.name,
-                            ad_group.status,
-                            ad_group.type ,
-                            metrics.clicks,
-                            metrics.impressions,
-                            metrics.ctr,
-                            metrics.average_cpc,
-                            metrics.cost_micros
-                        FROM ad_group
-                        WHERE segments.date DURING LAST_7_DAYS
-                        AND ad_group.status != 'REMOVED'
-                        """
-    prebuilt_query_ads = """
-                    SELECT ad_group_ad.ad.expanded_text_ad.headline_part1,
-                            ad_group_ad.ad.expanded_text_ad.headline_part2,
-                            ad_group_ad.ad.expanded_text_ad.headline_part3,
-                            ad_group_ad.ad.final_urls,
-                            ad_group_ad.ad.expanded_text_ad.description,
-                            ad_group_ad.ad.expanded_text_ad.description2,
-                            campaign.name,
-                            ad_group.name,
-                            ad_group_ad.policy_summary.approval_status,
-                            ad_group_ad.ad.type,
-                            metrics.clicks,
-                            metrics.impressions,
-                            metrics.ctr,
-                            metrics.average_cpc,
-                            metrics.cost_micros
-                        FROM ad_group_ad
-                        WHERE segments.date DURING LAST_7_DAYS
-                        AND ad_group_ad.status != 'REMOVED'
-                        """
-    prebuilt_query_search_keywords = """
-                    SELECT ad_group_criterion.keyword.text,
-                        campaign.name,
-                        ad_group.name,
-                        ad_group_criterion.system_serving_status,
-                        ad_group_criterion.keyword.match_type,
-                        ad_group_criterion.approval_status,
-                        ad_group_criterion.final_urls,
-                        metrics.clicks,
-                        metrics.impressions,
-                        metrics.ctr,
-                        metrics.average_cpc,
-                        metrics.cost_micros
-                    FROM keyword_view
-                    WHERE segments.date DURING LAST_7_DAYS
-                    AND ad_group_criterion.status != 'REMOVED'
-                    """
-    prebuilt_query_search_terms = """
-                    SELECT search_term_view.search_term,
-                        segments.keyword.info.match_type,
-                        search_term_view.status,
-                        campaign.name,
-                        ad_group.name,
-                        metrics.clicks,
-                        metrics.impressions,
-                        metrics.ctr,
-                        metrics.average_cpc,
-                        metrics.cost_micros,
-                        campaign.advertising_channel_type
-                    FROM search_term_view
-                    WHERE segments.date DURING LAST_7_DAYS
-                    """
-    prebuilt_query_audience = """
-                    SELECT ad_group_criterion.resource_name,
-                        ad_group_criterion.type,
-                        campaign.name,
-                        ad_group.name,
-                        ad_group_criterion.system_serving_status,
-                        ad_group_criterion.bid_modifier,
-                        metrics.clicks,
-                        metrics.impressions,
-                        metrics.ctr,
-                        metrics.average_cpc,
-                        metrics.cost_micros,
-                        campaign.advertising_channel_type
-                    FROM ad_group_audience_view
-                    WHERE segments.date DURING LAST_7_DAYS
-                    """
-    prebuilt_query_age ="""
-                    SELECT ad_group_criterion.age_range.type,
-                        campaign.name,
-                        ad_group.name,
-                        ad_group_criterion.system_serving_status,
-                        ad_group_criterion.bid_modifier,
-                        metrics.clicks,
-                        metrics.impressions,
-                        metrics.ctr,
-                        metrics.average_cpc,
-                        metrics.cost_micros,
-                        campaign.advertising_channel_type
-                    FROM age_range_view
-                    WHERE segments.date DURING LAST_7_DAYS
-                    """
-    prebuilt_query_gender = """
-                SELECT ad_group_criterion.gender.type,
-                    campaign.name,
-                    ad_group.name,
-                    ad_group_criterion.system_serving_status,
-                    ad_group_criterion.bid_modifier,
-                    metrics.clicks,
-                    metrics.impressions,
-                    metrics.ctr,
-                    metrics.average_cpc,
-                    metrics.cost_micros,
-                    campaign.advertising_channel_type
-                FROM gender_view
-                WHERE segments.date DURING LAST_7_DAYS                  
-                    """
-    prebuilt_query_location = """
-                    SELECT campaign_criterion.location.geo_target_constant,
-                    campaign.name,
-                    campaign_criterion.bid_modifier,
-                    metrics.clicks,
-                    metrics.impressions,
-                    metrics.ctr,
-                    metrics.average_cpc,
-                    metrics.cost_micros
-                FROM location_view
-                WHERE segments.date DURING LAST_7_DAYS
-                AND campaign_criterion.status != 'REMOVED'
-                    """
+  
 
     def configure(self, configuration_context, spec: GoogleAdObjectSpec):
         # TODO Check and throw config error maybe if spec.customer_id is not a string or does not have a specific format
@@ -338,6 +219,7 @@ class GoogleAdsQuery:
         ####################
         # TODO Implement config window with a query builder
         execution_query = self.define_query()
+        LOGGER.warning(f"this is the query:{execution_query}")
         
         #TODO move the pre-built queries to a separte file in the util folder pre-built_ad_queries.py
         DEFAULT_QUERY = """
@@ -422,30 +304,31 @@ class GoogleAdsQuery:
         ##################
 
         return knext.Table.from_pandas(pd.DataFrame(df))
-
+   
     def define_query(self):
+        query_mapping = {
+            "MANUALLY": self.query_custom,
+            "PREBUILT": {
+                "CAMPAIGNS": pb_queries.prebuilt_query_campaigns,
+                "ADGROUPS": pb_queries.prebuilt_query_adgroups,
+                "ADS": pb_queries.prebuilt_query_ads,
+                "SEARCHKEYWORDS": pb_queries.prebuilt_query_search_keywords,
+                "SEARCHTERMS": pb_queries.prebuilt_query_search_terms,
+                "AUDIENCE": pb_queries.prebuilt_query_audience,
+                "AGE": pb_queries.prebuilt_query_age,
+                "GENDER": pb_queries.prebuilt_query_gender,
+                "LOCATION": pb_queries.prebuilt_query_location
+            }
+        }
         query = ""
-        if self.query_mode == "MANUALLY":
-            query = self.query_custom
-        elif self.query_mode =="PREBUILT" and self.query_prebuilt_type =="CAMPAIGNS":
-            query = self.prebuilt_query_campaigns
-        elif self.query_mode =="PREBUILT" and self.query_prebuilt_type =="ADGROUPS":
-            query = self.prebuilt_query_adgroups
-        elif self.query_mode =="PREBUILT" and self.query_prebuilt_type =="ADS":
-            query = self.prebuilt_query_ads
-        elif self.query_mode =="PREBUILT" and self.query_prebuilt_type =="SEARCHKEYWORDS":
-            query = self.prebuilt_query_search_keywords
-        elif self.query_mode =="PREBUILT" and self.query_prebuilt_type =="SEARCHTERMS":
-            query = self.prebuilt_query_search_terms
-        elif self.query_mode =="PREBUILT" and self.query_prebuilt_type =="AUDIENCE":
-            query = self.prebuilt_query_audience
-        elif self.query_mode =="PREBUILT" and self.query_prebuilt_type =="AGE":
-            query = self.prebuilt_query_age
-        elif self.query_mode =="PREBUILT" and self.query_prebuilt_type =="GENDER":
-            query = self.prebuilt_query_gender
-        elif self.query_mode =="PREBUILT" and self.query_prebuilt_type =="LOCATION":
-            query = self.prebuilt_query_location
+        if self.query_mode in query_mapping:
+            if self.query_mode == "MANUALLY":
+                query = query_mapping[self.query_mode]
+            elif self.query_mode == "PREBUILT" and self.query_prebuilt_type in query_mapping[self.query_mode]:
+                query = query_mapping[self.query_mode][self.query_prebuilt_type].replace("$$start_date$$", str(self.date_start_query)).replace("$$end_date$$", str(self.date_end_query))
+    
         return query
+
     
  
 
