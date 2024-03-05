@@ -320,7 +320,7 @@ class GoogleAdsQuery:
 
     def configure(self, configuration_context, spec: GoogleAdObjectSpec):
         # TODO Check and throw config error maybe if spec.customer_id is not a string or does not have a specific format
-        if hasattr(spec, "customer_id") == False:
+        if hasattr(spec, "account_id") == False:
             raise knext.InvalidParametersError("Connect to the Google Ads Connector node.")
         pass #Which configuration I need to pass?? explain better the configure method, not 100% clear. 
 
@@ -330,7 +330,7 @@ class GoogleAdsQuery:
         i=0
         client: GoogleAdsClient
         client = port_object.client
-        customer_id = port_object.spec.customer_id
+        account_id = port_object.spec.account_id
         
 
         ####################
@@ -357,7 +357,7 @@ class GoogleAdsQuery:
         ga_service = client.get_service("GoogleAdsService")
 
         search_request = client.get_type("SearchGoogleAdsStreamRequest")
-        search_request.customer_id = customer_id
+        search_request.customer_id = account_id
         search_request.query = execution_query
         
 

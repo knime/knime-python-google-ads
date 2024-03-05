@@ -249,13 +249,13 @@ class GoogleAdsConnector:
         default_value="",
     )#.rule(knext.OneOf(dev_token_retrieval, [DeveloperTokenRetrieval.MANUALLY.name]),knext.Effect.SHOW,)
 
-    login_customer_id = knext.StringParameter(
+    manager_customer_id = knext.StringParameter(
         label="Manager Customer Id",
         description="The login-customer-id is equivalent to choosing an account in the Google Ads UI after signing in or clicking on your profile image at the top right.",
         default_value="",
     )#.rule(knext.OneOf(dev_token_retrieval, [DeveloperTokenRetrieval.MANUALLY.name]),knext.Effect.SHOW,)
 
-    customer_id = knext.StringParameter(
+    account_id = knext.StringParameter(
         label="Account Id",
         description="The account id of your target campaigns.",
         default_value="",
@@ -294,12 +294,12 @@ class GoogleAdsConnector:
 
         client = GoogleAdsClient(
             credentials=credentials,
-            developer_token=self.developer_token,
-            login_customer_id=self.login_customer_id,
+            developer_token=self.developer_token.strip(),
+            login_customer_id=self.manager_customer_id.replace("-","").strip(),
         )
         LOGGER.warning(f" GoogleAdsClient object: {dir(client)}")
 
-        campaign_ids = get_campaigns_id(client, self.customer_id)
+        campaign_ids = get_campaigns_id(client, self.account_id.replace("-","").strip())
         # customer_ids = get_customer_id(client)
         # LOGGER.warning(customer_ids)
 
@@ -308,11 +308,11 @@ class GoogleAdsConnector:
         # test_customer_id(self.customer_id)
 
         LOGGER.warning(
-            f"Retrieving connection information...\nDeveloper token: {client.developer_token}\nCustomer ID: {self.customer_id}"
+            f"Retrieving connection information...\nDeveloper token: {client.developer_token}\nCustomer ID: {self.account_id}"
         )
 
         port_object = GoogleAdConnectionObject(
-            GoogleAdObjectSpec(customer_id=self.customer_id, campaign_ids=campaign_ids),
+            GoogleAdObjectSpec(account_id=self.account_id.replace("-","").strip(), campaign_ids=campaign_ids),
             client=client,
         )
         return port_object
@@ -327,12 +327,12 @@ def test_connection(client: GoogleAdsClient):
     pass
 
 
-def test_customer_id(customer_id: str):
+def test_customer_id(account_id: str):
     # TODO Implement
     pass
 
 
-def get_campaigns_id(client: GoogleAdsClient, customer_id: str) -> list[str]:
+def get_campaigns_id(client: GoogleAdsClient, account_id: str) -> list[str]:
     query = """
     SELECT
         campaign.id,
@@ -344,7 +344,7 @@ def get_campaigns_id(client: GoogleAdsClient, customer_id: str) -> list[str]:
     ga_service = client.get_service("GoogleAdsService")
 
     search_request = client.get_type("SearchGoogleAdsStreamRequest")
-    search_request.customer_id = customer_id
+    search_request.customer_id = account_id
     search_request.query = query
     LOGGER.warning("Setting query done.")
 
