@@ -1,5 +1,5 @@
 org.knime.python.google_ads_ext:
-  src: C:\Users\diego.rodriguez\git\knime-python-google-ads # Path to folder containing the extension files
-  conda_env_path:   C:\Users\diego.rodriguez\.conda\envs\adwords-ext-env # Path to the Python environment to use
+  src: <LOCAL_PATH_TO>\\knime-python-google-ads # Path to folder containing the extension files
+  conda_env_path:   <LOCAL_PATH_TO>\adwords-ext-env # Path to the Python environment to use
   debug_mode: true # Optional line, if set to true, it will always use the latest changes of execute/configure, when that method is used within the KNIME Analytics Platform
   
