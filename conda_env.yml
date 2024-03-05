@@ -1,8 +1,9 @@
+name: google_ads_env
 channels:
   - knime
   - conda-forge
 dependencies:
   - python=3.11
-  - knime-python-base=5.1
+  - knime-python-base
   - knime-extension
-  - google-ads 
+  - google-ads=23.1.0
