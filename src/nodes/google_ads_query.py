@@ -129,6 +129,7 @@ class QueryBuilderMode(knext.EnumParameterOptions):
     google_ad_port_type,
 )
 @knext.output_table(name="Output Data", description="KNIME table with query results")
+
 class GoogleAdsQuery:
     """Fetch data from Google Adwords for a given query.
 
@@ -164,6 +165,14 @@ class GoogleAdsQuery:
         default_value= HardCodedQueries.CAMPAIGNS.name,
         enum= HardCodedQueries,
         ).rule(knext.OneOf(query_mode, [QueryBuilderMode.PREBUILT.name]),knext.Effect.SHOW,)
+    
+    custom_timeout = knext.IntParameter(
+        label= "Timeout (seconds)",
+        description= "When making a request, you can set a \"timeout\" parameter to specify a client-side response deadline in seconds. If you don't set it, the default timeout for the Google Ads API SearchStream method is five minutes.",
+        default_value= 300,
+        min_value= 1,
+        is_advanced=True
+    )
     
 
     #TODO move the pre-built queries to a separte file in the util folder pre-built_ad_queries.py
@@ -355,7 +364,7 @@ class GoogleAdsQuery:
         df = pd.DataFrame()
         #TODO add configuration for timeout (find default timeout and use it.)
         try:
-            response_stream = ga_service.search_stream(search_request)
+            response_stream = ga_service.search_stream(search_request,timeout=self.custom_timeout)
             data = []
             header_array = []
           
