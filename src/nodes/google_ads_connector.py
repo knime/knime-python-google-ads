@@ -295,14 +295,12 @@ class GoogleAdsConnector:
         client = GoogleAdsClient(
             credentials=credentials,
             developer_token=self.developer_token.strip(),
-            login_customer_id=self.manager_customer_id.replace("-","").strip(),
+            login_customer_id=cleanup_ids(self.manager_customer_id),
         )
         LOGGER.warning(f" GoogleAdsClient object: {dir(client)}")
 
-        campaign_ids = get_campaigns_id(client, self.account_id.replace("-","").strip())
-        # customer_ids = get_customer_id(client)
-        # LOGGER.warning(customer_ids)
-
+        campaign_ids = get_campaigns_id(client, cleanup_ids(self.account_id))
+       
         test_connection(client)
 
         # test_customer_id(self.customer_id)
@@ -312,10 +310,15 @@ class GoogleAdsConnector:
         )
 
         port_object = GoogleAdConnectionObject(
-            GoogleAdObjectSpec(account_id=self.account_id.replace("-","").strip(), campaign_ids=campaign_ids),
+            GoogleAdObjectSpec(account_id=cleanup_ids(self.account_id), campaign_ids=campaign_ids),
             client=client,
         )
         return port_object
+
+def cleanup_ids(id: str)->str:
+    if id.strip() == "":
+        raise knext.InvalidParametersError("Please review your Manager Customer Id and your Account Id")
+    return id.replace("-","").strip()
 
 
 def test_connection(client: GoogleAdsClient):

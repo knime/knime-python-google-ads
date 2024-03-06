@@ -61,49 +61,10 @@ from google.ads.googleads.errors import GoogleAdsException
 from google.ads.googleads.v15.services.types.google_ads_service import GoogleAdsRow
 from google.protobuf.internal.containers import RepeatedScalarFieldContainer
 from google.protobuf.pyext import _message
+import util.utils as utils
 
 
 LOGGER = logging.getLogger(__name__)
-
-
-class HardCodedQueries(knext.EnumParameterOptions):
-    CAMPAIGNS = (
-        "Campaigns",
-        "The default Campaigns overview screen in the UI."
-    )
-    ADGROUPS = (
-        
-        "Ad Groups",
-        "The default Ad groups overview screen in the UI."
-    )
-    ADS = (
-        "Ads",
-        "The default Ads overview screen in the UI. Note that this particular query specifically fetches the individual components of an Expanded Text Ad, which are seen rendered together in the UI screen's **Ad** column."
-    )
-    SEARCHKEYWORDS = (
-        "Search Keywords",
-        "The default Search keywords overview screen in the UI."
-    )
-    SEARCHTERMS = (
-        "Search Terms",
-        "The default Search terms overview screen in the UI."
-    )
-    AUDIENCE = (
-        "Audiences",
-        "The default Audiences overview screen in the UI. Note that the reporting API returns audiences by their criterion IDs. To get their display names, look up the IDs in the reference tables provided in the [Codes and formats page](https://developers.google.com/google-ads/api/data/codes-formats). You can key off the **ad_group_criterion.type** field to determine which criteria type table to use."
-    )
-    AGE = (
-        "Age (Demographics)",
-        "The default Age demographics overview screen in the UI."
-    )
-    GENDER = (
-        "Gender (Demographics)",
-        "The default Gender demographics overview screen in the UI."
-    )
-    LOCATION = (
-        "Locations",
-        "The default Locations overview screen in the UI. Note that the reporting API returns locations by their criterion IDs. To get their display names, look up the **campaign_criterion.location.geo_target_constant** in the [geo target data](https://developers.google.com/google-ads/api/data/geotargets), or use the API to query the **geo_target_constant resource**."
-    )
 
 
 class QueryBuilderMode(knext.EnumParameterOptions):
@@ -115,7 +76,6 @@ class QueryBuilderMode(knext.EnumParameterOptions):
         "Custom",
         "Build your query using [Google Ads Query Builder](https://developers.google.com/google-ads/api/fields/v12/overview_query_builder), then validate it with [Google Ads Query Validator](https://developers.google.com/google-ads/api/fields/v12/query_validator) for desired results.",
     )
-
 
 
 @knext.node(
@@ -160,11 +120,11 @@ class GoogleAdsQuery:
         number_of_lines = 10,
     ).rule(knext.OneOf(query_mode, [QueryBuilderMode.MANUALLY.name]),knext.Effect.SHOW,)
 
-    query_prebuilt_type = knext.EnumParameter(
+    query_prebuilt_name = knext.EnumParameter(
         label="Pre-built queries:",
         description="Select an available pre-built query to be used.",
-        default_value= HardCodedQueries.CAMPAIGNS.name,
-        enum= HardCodedQueries,
+        default_value= pb_queries.HardCodedQueries.CAMPAIGNS.name,
+        enum= pb_queries.HardCodedQueries,
         ).rule(knext.OneOf(query_mode, [QueryBuilderMode.PREBUILT.name]),knext.Effect.SHOW,)
     
     date_start_query = knext.DateTimeParameter(
@@ -213,9 +173,8 @@ class GoogleAdsQuery:
         client = port_object.client
         account_id = port_object.spec.account_id
         
-
         ####################
-        # [START QUERY TEST]
+        # [START QUERY]
         ####################
         # TODO Implement config window with a query builder
         execution_query = self.define_query()
@@ -244,7 +203,6 @@ class GoogleAdsQuery:
         
 
         df = pd.DataFrame()
-        #TODO add configuration for timeout (find default timeout and use it.)
         try:
             response_stream = ga_service.search_stream(search_request,timeout=self.custom_timeout)
             data = []
@@ -291,42 +249,31 @@ class GoogleAdsQuery:
                         data_row.append(attribute_value)
                     data.append(data_row)
                     i += 1
+                    utils.check_canceled(exec_context)
                     exec_context.set_progress(i/number_of_results,"We are preparing your data \U0001F468\u200D\U0001F373")
             df = pd.DataFrame(data, columns=header_array)
             
         except GoogleAdsException as ex:
-            LOGGER.warning(
-                "Google Ads API request failed. Please check your query and credentials."
-            )
-            LOGGER.warning(ex.error)
+            status_error = ex.error.code().name
+            error_messages = ""
+            for error in ex.failure.errors:
+                error_messages = " ".join([error.message])
+            error_first_part= " ".join(["Failed with status",status_error,])
+            error_second_part = " ".join([error_messages])
+            error_to_raise = ". ".join([error_first_part,error_second_part])
+            raise knext.InvalidParametersError(error_to_raise)
         ##################
-        # [END QUERY TEST]
+        # [END QUERY]
         ##################
-
         return knext.Table.from_pandas(pd.DataFrame(df))
    
     def define_query(self):
-        query_mapping = {
-            "MANUALLY": self.query_custom,
-            "PREBUILT": {
-                "CAMPAIGNS": pb_queries.prebuilt_query_campaigns,
-                "ADGROUPS": pb_queries.prebuilt_query_adgroups,
-                "ADS": pb_queries.prebuilt_query_ads,
-                "SEARCHKEYWORDS": pb_queries.prebuilt_query_search_keywords,
-                "SEARCHTERMS": pb_queries.prebuilt_query_search_terms,
-                "AUDIENCE": pb_queries.prebuilt_query_audience,
-                "AGE": pb_queries.prebuilt_query_age,
-                "GENDER": pb_queries.prebuilt_query_gender,
-                "LOCATION": pb_queries.prebuilt_query_location
-            }
-        }
         query = ""
-        if self.query_mode in query_mapping:
-            if self.query_mode == "MANUALLY":
-                query = query_mapping[self.query_mode]
-            elif self.query_mode == "PREBUILT" and self.query_prebuilt_type in query_mapping[self.query_mode]:
-                query = query_mapping[self.query_mode][self.query_prebuilt_type].replace("$$start_date$$", str(self.date_start_query)).replace("$$end_date$$", str(self.date_end_query))
-    
+        
+        if self.query_mode == "MANUALLY":
+            query = self.query_custom
+        elif self.query_mode == "PREBUILT":
+            query = pb_queries.get_query(self.query_prebuilt_name,self.date_start_query,self.date_end_query)
         return query
 
     

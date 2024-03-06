@@ -47,3 +47,10 @@ import knime.extension as knext
 import logging
 
 LOGGER = logging.getLogger(__name__)
+
+def check_canceled(exec_context: knext.ExecutionContext) -> None:
+    """
+    Checks if the user has canceled the execution and if so throws a RuntimeException
+    """
+    if exec_context.is_canceled():
+        raise RuntimeError("Execution canceled")
