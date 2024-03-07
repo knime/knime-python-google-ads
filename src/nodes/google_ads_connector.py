@@ -375,11 +375,15 @@ def get_campaigns_id(client: GoogleAdsClient, account_id: str) -> list[str]:
         df = pd.DataFrame(data, columns=header_array)
 
     except GoogleAdsException as ex:
-        LOGGER.warning(  # TODO New error message # NOSONAR
-            "Google Ads API request failed. Please check your query and credentials."
-        )
-        LOGGER.warning(ex)
+        status_error = ex.error.code().name
+        error_messages = ""
+        for error in ex.failure.errors:
+            error_messages = " ".join([error.message])
+        error_first_part= " ".join(["Failed with status",status_error,])
+        error_second_part = " ".join([error_messages])
+        error_to_raise = ". ".join([error_first_part,error_second_part])
+        raise knext.InvalidParametersError(error_to_raise)
+    
     df_list = pd.DataFrame(df)["campaign.id"].tolist()
-    LOGGER.warning("funny list")
     LOGGER.warning(df_list)
     return df_list
