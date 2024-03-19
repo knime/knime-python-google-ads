@@ -59,7 +59,7 @@ class GoogleAdObjectSpec(knext.PortObjectSpec):
     @property
     def account_id(self) -> str:
         return self._account_id
-    
+
     @property
     def campaign_ids(self) -> list[str]:
         return self._campaign_ids
@@ -78,9 +78,11 @@ class GoogleAdConnectionObject(ConnectionPortObject):
         self,
         spec: GoogleAdObjectSpec,
         client: "client",
+        credential: "credential",
     ) -> None:
         super().__init__(spec)
         self._client = client
+        self._credential = credential
 
     @property
     def spec(self) -> GoogleAdObjectSpec:
@@ -90,6 +92,10 @@ class GoogleAdConnectionObject(ConnectionPortObject):
     def client(self):
         return self._client
 
+    @property
+    def credential(self):
+        return self._credential
+
     def to_connection_data(self):
         """
         Provide the data that makes up this ConnectionPortObject such that it can be used
@@ -97,6 +103,7 @@ class GoogleAdConnectionObject(ConnectionPortObject):
         """
         return {
             "client": self._client,
+            "credential": self._credential,
         }
 
     @classmethod
@@ -112,7 +119,7 @@ class GoogleAdConnectionObject(ConnectionPortObject):
         all nodes using this ConnectionPortObject.
         """
 
-        return cls(spec, data["client"])
+        return cls(spec, data["client"], data["credential"])
 
 
 google_ad_port_type = knext.port_type(

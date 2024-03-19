@@ -111,10 +111,10 @@ def manager_customer_ids(ctx: knext.DialogCreationContext):
 
 
 def retrieve_customer_ids(ctx: knext.DialogCreationContext) -> list[str]:
-    query = """"""
+    query = """ """
     SELECT 
         customer_client.id
-    FROM customer_client """"""
+    FROM customer_client """ """
 
     # Accessing access token from input credential port via DialogCreationContext
     specs = ctx.get_input_specs()
@@ -210,6 +210,7 @@ class GAdsconnectorLoaderCustomerIDs:
     customer_id_retrieval = _create_specific_customer_ids_list()
 """
 
+
 @knext.node(
     name="Google Ads Connector",
     node_type=knext.NodeType.MANIPULATOR,
@@ -232,6 +233,7 @@ class GoogleAdsConnector:
     Long description of the node.
     Can be multiple lines.
     """
+
     """
     dev_token_retrieval = knext.EnumParameter(
         "Connection method",
@@ -247,19 +249,19 @@ class GoogleAdsConnector:
         label="Developer Token",
         description="The Google developer token is needed to connect to the Google Ads API. It can be obtained following [this docucmentation](https://developers.google.com/google-ads/api/docs/get-started/dev-token?hl=en).",
         default_value="",
-    )#.rule(knext.OneOf(dev_token_retrieval, [DeveloperTokenRetrieval.MANUALLY.name]),knext.Effect.SHOW,)
+    )  # .rule(knext.OneOf(dev_token_retrieval, [DeveloperTokenRetrieval.MANUALLY.name]),knext.Effect.SHOW,)
 
     manager_customer_id = knext.StringParameter(
         label="Manager Customer Id",
         description="The login-customer-id is equivalent to choosing an account in the Google Ads UI after signing in or clicking on your profile image at the top right.",
         default_value="",
-    )#.rule(knext.OneOf(dev_token_retrieval, [DeveloperTokenRetrieval.MANUALLY.name]),knext.Effect.SHOW,)
+    )  # .rule(knext.OneOf(dev_token_retrieval, [DeveloperTokenRetrieval.MANUALLY.name]),knext.Effect.SHOW,)
 
     account_id = knext.StringParameter(
         label="Account Id",
         description="The account id of your target campaigns.",
         default_value="",
-    )#.rule(knext.OneOf(dev_token_retrieval, [DeveloperTokenRetrieval.MANUALLY.name]),knext.Effect.SHOW,)
+    )  # .rule(knext.OneOf(dev_token_retrieval, [DeveloperTokenRetrieval.MANUALLY.name]),knext.Effect.SHOW,)
 
     """
     input_settings = GAdsconnectorLoaderInputSettings().rule(
@@ -274,6 +276,7 @@ class GoogleAdsConnector:
         knext.Effect.HIDE,
     )
     """
+
     def configure(
         self,
         configuration_context: knext.ConfigurationContext,
@@ -300,7 +303,7 @@ class GoogleAdsConnector:
         LOGGER.warning(f" GoogleAdsClient object: {dir(client)}")
 
         campaign_ids = get_campaigns_id(client, cleanup_ids(self.account_id))
-       
+
         test_connection(client)
 
         # test_customer_id(self.customer_id)
@@ -310,15 +313,21 @@ class GoogleAdsConnector:
         )
 
         port_object = GoogleAdConnectionObject(
-            GoogleAdObjectSpec(account_id=cleanup_ids(self.account_id), campaign_ids=campaign_ids),
+            GoogleAdObjectSpec(
+                account_id=cleanup_ids(self.account_id), campaign_ids=campaign_ids
+            ),
             client=client,
+            credential=credential,
         )
         return port_object
 
-def cleanup_ids(id: str)->str:
+
+def cleanup_ids(id: str) -> str:
     if id.strip() == "":
-        raise knext.InvalidParametersError("Please review your Manager Customer Id and your Account Id")
-    return id.replace("-","").strip()
+        raise knext.InvalidParametersError(
+            "Please review your Manager Customer Id and your Account Id"
+        )
+    return id.replace("-", "").strip()
 
 
 def test_connection(client: GoogleAdsClient):
@@ -379,11 +388,16 @@ def get_campaigns_id(client: GoogleAdsClient, account_id: str) -> list[str]:
         error_messages = ""
         for error in ex.failure.errors:
             error_messages = " ".join([error.message])
-        error_first_part= " ".join(["Failed with status",status_error,])
+        error_first_part = " ".join(
+            [
+                "Failed with status",
+                status_error,
+            ]
+        )
         error_second_part = " ".join([error_messages])
-        error_to_raise = ". ".join([error_first_part,error_second_part])
+        error_to_raise = ". ".join([error_first_part, error_second_part])
         raise knext.InvalidParametersError(error_to_raise)
-    
+
     df_list = pd.DataFrame(df)["campaign.id"].tolist()
     LOGGER.warning(df_list)
     return df_list
