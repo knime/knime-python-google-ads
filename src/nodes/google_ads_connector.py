@@ -164,9 +164,7 @@ class GoogleAdsConnector:
 
         port_object = GoogleAdConnectionObject(
             GoogleAdObjectSpec(
-                account_id=cleanup_ids(self.account_id),
-                campaign_ids=campaign_ids,
-                credentials=credentials,
+                account_id=cleanup_ids(self.account_id), campaign_ids=campaign_ids
             ),
             client=client,
         )
