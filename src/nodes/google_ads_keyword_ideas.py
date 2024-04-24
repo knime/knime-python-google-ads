@@ -42,6 +42,7 @@
 #  when such Node is propagated with or for interoperation with KNIME.
 # ------------------------------------------------------------------------
 
+
 import logging
 import knime.extension as knext
 import google_ads_ext
@@ -52,69 +53,51 @@ from util.common import (
     google_ad_port_type,
 )
 from google.ads.googleads.client import GoogleAdsClient
-from google.ads.googleads.v16.services.services.google_ads_service.client import (
-    GoogleAdsServiceClient,
+from google.ads.googleads.v14.services.services.google_ads_service.client import (
+    GoogleAdsServiceClient
 )
-from google.oauth2.credentials import Credentials
-
-from google.ads.googleads.v16.services.services.keyword_plan_idea_service.client import (
+from google.ads.googleads.v14.services.services.keyword_plan_idea_service.client import(
     KeywordPlanIdeaServiceClient,
+    )
+from google.ads.googleads.v14.services.services.geo_target_constant_service.client import (
+    GeoTargetConstantServiceClient
 )
-from google.ads.googleads.v16.services.services.geo_target_constant_service.client import (
-    GeoTargetConstantServiceClient,
-)
-from google.ads.googleads.v16.services.types.keyword_plan_idea_service import (
+from google.ads.googleads.v14.services.types.keyword_plan_idea_service import (
     GenerateKeywordIdeasRequest,
 )
-from google.ads.googleads.v16.enums.types.keyword_plan_competition_level import (
-    KeywordPlanCompetitionLevelEnum,
+from google.ads.googleads.v14.enums.types.keyword_plan_competition_level import (
+   KeywordPlanCompetitionLevelEnum 
 )
-from google.ads.googleads.v16.enums.types.keyword_plan_network import (
+from google.ads.googleads.v14.enums.types.keyword_plan_network import (
     KeywordPlanNetworkEnum,
 )
 
 LOGGER = logging.getLogger(__name__)
 
-knext.DialogCreationContext()
-
-
-def retrieve_locations(self):
-
-    client: GoogleAdsClient
-    client = google_ad_port_type.object_class.client
-
-    # Calls the Geo Target Constants service to build the request to get location IDs and names
-    geo_target_constants_service: GoogleAdsServiceClient
-    geo_target_constants_service = client.get_service("GeoTargetConstantService")
-
-    geo_target_constants_request = client.get_type("SuggestGeoTargetConstantsRequest")
-
-    results = geo_target_constants_request.suggest_geo_target_constants(
-        geo_target_constants_request
+@knext.parameter_group(label="Select target column, the language and the location")
+class MySettings:
+    location_id = knext.StringParameter(
+        label= "Location ID",
+        description="Input your location ID",
+        default_value= "1023191",
+        is_advanced= False,
+        )
+    
+    language_id = knext.StringParameter(
+        label="Language Id",
+        description="Input the Language ID",
+        default_value="1000",
+        is_advanced= False,
+        )
+    
+    selected_column = knext.ColumnParameter(
+        "Keywords Column",
+        "KNIME table column containing the kewyords from which fetch the ideas with the search volume",
+        port_index= 1,
+        include_row_key= False,
+        include_none_column= False,
+        since_version=None,
     )
-
-    geo_target_constants_id = []
-    for suggestion in results.geo_target_constant_suggestions:
-        geo_target_constant = suggestion.geo_target_constant
-        geo_target_constants_id.append(geo_target_constant.resource_name)
-
-    return geo_target_constants_id
-
-
-def _create_location_ids_list() -> knext.StringParameter:
-    return knext.StringParameter(
-        label="Location Id",
-        description="",
-        choices=lambda c: retrieve_locations(c),
-        default_value="Unselected",
-        is_advanced=False,
-    )
-
-
-@knext.parameter_group(label="")
-class LocationListInputSettings:
-    location_id = _create_location_ids_list()
-
 
 @knext.node(
     name="Google Ads Keyword Ideas",
@@ -129,29 +112,154 @@ class LocationListInputSettings:
 )
 @knext.input_table(
     name="Keywords",
-    description="KNIME table that contains a list of keywords or URLs to generate ideas from",
+    description="KNIME table that contains a list of keywords to generate ideas from"
 )
 @knext.output_table(name="Output Data", description="KNIME table with keyword ideas")
-class GoogleAdsKwdIdeas(knext.PythonNode):
 
-    input_settings = LocationListInputSettings()
 
-    def configure(
-        self,
-        configure_context: knext.DialogCreationContext,
-        spec: GoogleAdObjectSpec,
-        input_table_schema: knext.Schema,
-    ):
+class GoogleAdsKwdIdeas(knext.PythonNode):    
+    
+    my_settings = MySettings()
+
+    def configure(self, configure_context: knext.DialogCreationContext, spec: GoogleAdObjectSpec, input_table_schema: knext.Schema):
         # TODO Check and throw config error maybe if spec.customer_id is not a string or does not have a specific format NOSONAR
         # We will add one column of type double to the table
-        # return input_table_schema.append(knext.Column(knext.string(), "Keyword Ideas"))
+        #return input_table_schema.append(knext.Column(knext.string(), "Keyword Ideas"))
         pass
+        
+        
 
-    def execute(
-        self,
-        exec_context: knext.ExecutionContext,
-        port_object: GoogleAdConnectionObject,
-        input_table: knext.Table,
-    ) -> knext.Table:
+    def execute(self, exec_context: knext.ExecutionContext, port_object: GoogleAdConnectionObject,  input_table: knext.Table) -> knext.Table: 
+        #TODO make optional the page url provider to generate ideas also from there! NOSONAR
 
-        pass
+        location_ids = [self.my_settings.location_id]
+        selected_column = self.my_settings.selected_column
+        if self.my_settings.selected_column != "<none>":
+            keyword_texts_df = input_table.to_pandas()
+        else:
+            exec_context.set_warning("No column selected")
+        
+        keyword_texts = keyword_texts_df[selected_column].tolist()
+
+        LOGGER.warning(msg="check the keyword_texts object")
+        LOGGER.warning(type(keyword_texts))
+        #TODO pass a KNIME table and transform here in a list, select also the column!! keyword_texts = keyword_processing.values.tolist() NOSONAR
+
+        client: GoogleAdsClient
+        client = port_object.client
+        customer_id = port_object.spec.customer_id
+        
+        
+        keyword_plan_idea_service: KeywordPlanIdeaServiceClient    
+        keyword_plan_idea_service = client.get_service("KeywordPlanIdeaService") 
+
+        #TODO check this part and also the keyword_plan_network NOSONAR
+        # kwd_plan_competition: KeywordPlanCompetitionLevelEnum
+        # kwd_plan_competition = client.get_type("KeywordPlanCompetitionLevelEnum")
+        # keyword_competition_level_enum.status = (client.enums.kwd_plan_competition)
+        
+        keyword_plan_network = 3
+        # (
+        #     client.enums.KeywordPlanNetworkEnum.GOOGLE_SEARCH_AND_PARTNERS
+        # )
+        # client: GoogleAdsClient NOSONAR
+        # client = port_object.client
+        location_rns = map_locations_ids_to_resource_names(self,client,location_ids)
+        language_rn_get_service: GoogleAdsServiceClient
+        language_rn_get_service= client.get_service("GoogleAdsService")
+        language_rn = language_rn_get_service.language_constant_path(self.my_settings.language_id)
+    
+        # Either keywords or a page_url are required to generate keyword ideas
+        # so this raises an error if neither are provided.
+        if not keyword_texts: #TODO or page_url): NOSONAR
+            raise ValueError(
+                "At least one of keywords"# or page URL is required, " NOSONAR
+                "but neither was specified."
+            )
+
+        # Only one of the fields "url_seed", "keyword_seed", or
+        # "keyword_and_url_seed" can be set on the request, depending on whether
+        # keywords, a page_url or both were passed to this function.
+        request: GenerateKeywordIdeasRequest
+        request = client.get_type("GenerateKeywordIdeasRequest")
+        request.customer_id = customer_id
+        request.language = language_rn
+        request.geo_target_constants = location_rns
+        request.include_adult_keywords = False
+        request.keyword_plan_network = keyword_plan_network
+        
+
+
+        #TODO admit a website URL as input NOSONAR
+        # To generate keyword ideas with only a page_url and no keywords we need
+        # to initialize a UrlSeed object with the page_url as the "url" field.
+        # if not keyword_texts and page_url:
+        #     request.url_seed.url = page_url
+
+        # To generate keyword ideas with only a list of keywords and no page_url
+        # we need to initialize a KeywordSeed object and set the "keywords" field
+        # to be a list of StringValue objects.
+        #if not keyword_texts.empty: #and not page_url:
+        request.keyword_seed.keywords.extend(keyword_texts)
+            
+        
+        
+        # To generate keyword ideas using both a list of keywords and a page_url we
+        # need to initialize a KeywordAndUrlSeed object, setting both the "url" and
+        # "keywords" fields.
+        # if keyword_texts and page_url:
+        #     request.keyword_and_url_seed.url = page_url
+        #     request.keyword_and_url_seed.keywords.extend(keyword_texts)
+
+        
+        keyword_ideas = keyword_plan_idea_service.generate_keyword_ideas(
+            request=request
+        )
+        LOGGER.warning("let'see what it is")
+        LOGGER.warning(type(keyword_ideas))
+        # for idea in keyword_ideas: NOSONAR
+        #     competition_value = idea.keyword_idea_metrics.competition.name
+        #     print(
+        #         f'Keyword idea text "{idea.text}" has '
+        #         f'"{idea.keyword_idea_metrics.avg_monthly_searches}" '
+        #         f'average monthly searches and "{competition_value}" '
+        #         "competition.\n"
+        #     )
+        
+        # Create empty lists to store data
+        keywords = []
+        avg_monthly_searches = []
+        competition_values = []   
+
+        # Extract data and populate lists
+        for idea in keyword_ideas:
+            # keywords.append(idea['text']) NOSONAR
+            # avg_monthly_searches.append(idea['keyword_idea_metrics']['avg_monthly_searches'])
+            # competition_values.append(idea['keyword_idea_metrics']['competition']['name'])
+            keywords.append(idea.text)
+            avg_monthly_searches.append(idea.keyword_idea_metrics.avg_monthly_searches)
+            competition_values.append(idea.keyword_idea_metrics.competition.name)
+        # Create a DataFrame from the lists
+        data = {
+            'Keyword': keywords,
+            'Avg_Monthly_Searches': avg_monthly_searches,
+            'Competition': competition_values
+        }
+        LOGGER.warning(msg="check the data df")
+        df = pd.DataFrame(data)
+        LOGGER.warning(type(df))
+        # Display the DataFrame
+        return knext.Table.from_pandas(df)
+         
+        # [END generate_keyword_ideas]
+
+
+def map_locations_ids_to_resource_names(self, port_object,location_ids):
+    
+    client: GoogleAdsClient
+    client = port_object
+    
+    build_resource_name_client: GeoTargetConstantServiceClient
+    build_resource_name_client = client.get_service("GeoTargetConstantService")
+    build_resource_name= build_resource_name_client.geo_target_constant_path
+    return [build_resource_name(location_id) for location_id in location_ids]
