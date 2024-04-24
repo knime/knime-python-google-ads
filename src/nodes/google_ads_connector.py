@@ -292,6 +292,10 @@ class GoogleAdsConnector:
         LOGGER.warning(dir(credential.spec))
         LOGGER.warning(f"What developer token I am passing here {self.developer_token}")
 
+        # Combine credentials with customer ID
+        # Use the access token provided in the input port. The token gets automatically refreshed by the upstream Google Authenticator node.
+        credentials = Credentials(token=str(credential.spec.auth_parameters))
+
         client = GoogleAdsClient(
             credentials=credentials,
             developer_token=self.developer_token.strip(),
@@ -310,7 +314,11 @@ class GoogleAdsConnector:
         )
 
         port_object = GoogleAdConnectionObject(
-            GoogleAdObjectSpec(account_id=cleanup_ids(self.account_id), campaign_ids=campaign_ids),
+            GoogleAdObjectSpec(
+                account_id=cleanup_ids(self.account_id),
+                campaign_ids=campaign_ids,
+                credentials=credentials,
+            ),
             client=client,
         )
         return port_object
