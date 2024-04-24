@@ -90,7 +90,6 @@ class QueryBuilderMode(knext.EnumParameterOptions):
     google_ad_port_type,
 )
 @knext.output_table(name="Output Data", description="KNIME table with query results")
-
 class GoogleAdsQuery:
     """Fetch data from Google Adwords for a given query.
 
@@ -101,12 +100,11 @@ class GoogleAdsQuery:
     query_mode = knext.EnumParameter(
         "Query mode",
         "You can choose from **pre-built** queries or create a **custom** one from scratch.",
-        
         QueryBuilderMode.PREBUILT.name,
         QueryBuilderMode,
         style=knext.EnumParameter.Style.VALUE_SWITCH,
     )
-    
+
     query_custom = knext.MultilineStringParameter(
         label="Custom query:",
         description="Input your query below, replacing the default query.",
@@ -117,16 +115,22 @@ class GoogleAdsQuery:
             metrics.clicks,
             metrics.cost_micros
         FROM campaign""",
-        number_of_lines = 10,
-    ).rule(knext.OneOf(query_mode, [QueryBuilderMode.MANUALLY.name]),knext.Effect.SHOW,)
+        number_of_lines=10,
+    ).rule(
+        knext.OneOf(query_mode, [QueryBuilderMode.MANUALLY.name]),
+        knext.Effect.SHOW,
+    )
 
     query_prebuilt_name = knext.EnumParameter(
         label="Pre-built queries:",
         description="Select an available pre-built query to be used.",
-        default_value= pb_queries.HardCodedQueries.CAMPAIGNS.name,
-        enum= pb_queries.HardCodedQueries,
-        ).rule(knext.OneOf(query_mode, [QueryBuilderMode.PREBUILT.name]),knext.Effect.SHOW,)
-    
+        default_value=pb_queries.HardCodedQueries.CAMPAIGNS.name,
+        enum=pb_queries.HardCodedQueries,
+    ).rule(
+        knext.OneOf(query_mode, [QueryBuilderMode.PREBUILT.name]),
+        knext.Effect.SHOW,
+    )
+
     date_start_query = knext.DateTimeParameter(
         label="Start date",
         description="Define the start date for the selected pre-built query.",
@@ -135,7 +139,10 @@ class GoogleAdsQuery:
         show_time=False,
         show_seconds=False,
         show_milliseconds=False,
-    ).rule(knext.OneOf(query_mode, [QueryBuilderMode.PREBUILT.name]),knext.Effect.SHOW,)
+    ).rule(
+        knext.OneOf(query_mode, [QueryBuilderMode.PREBUILT.name]),
+        knext.Effect.SHOW,
+    )
 
     date_end_query = knext.DateTimeParameter(
         label="End date",
@@ -145,42 +152,47 @@ class GoogleAdsQuery:
         show_time=False,
         show_seconds=False,
         show_milliseconds=False,
-    ).rule(knext.OneOf(query_mode, [QueryBuilderMode.PREBUILT.name]),knext.Effect.SHOW,)
-    
-    custom_timeout = knext.IntParameter(
-        label= "Timeout (seconds)",
-        description= "When making a request, you can set a \"timeout\" parameter to specify a client-side response deadline in seconds. If you don't set it, the default timeout for the Google Ads API SearchStream method is five minutes.",
-        default_value= 300,
-        min_value= 1,
-        is_advanced=True
+    ).rule(
+        knext.OneOf(query_mode, [QueryBuilderMode.PREBUILT.name]),
+        knext.Effect.SHOW,
     )
-    
 
-    #TODO move the pre-built queries to a separte file in the util folder pre-built_ad_queries.py
-  
+    custom_timeout = knext.IntParameter(
+        label="Timeout (seconds)",
+        description='When making a request, you can set a "timeout" parameter to specify a client-side response deadline in seconds. If you don\'t set it, the default timeout for the Google Ads API SearchStream method is five minutes.',
+        default_value=300,
+        min_value=1,
+        is_advanced=True,
+    )
 
     def configure(self, configuration_context, spec: GoogleAdObjectSpec):
         # TODO Check and throw config error maybe if spec.customer_id is not a string or does not have a specific format
         if hasattr(spec, "account_id") == False:
-            raise knext.InvalidParametersError("Connect to the Google Ads Connector node.")
-        pass #Which configuration I need to pass?? explain better the configure method, not 100% clear. 
+            raise knext.InvalidParametersError(
+                "Connect to the Google Ads Connector node."
+            )
+        pass  # Which configuration I need to pass?? explain better the configure method, not 100% clear.
 
-    def execute(self, exec_context: knext.ExecutionContext, port_object: GoogleAdConnectionObject):
-        
-        #counter to build the progress bar during execution
-        i=0
+    def execute(
+        self,
+        exec_context: knext.ExecutionContext,
+        port_object: GoogleAdConnectionObject,
+    ):
+
+        # counter to build the progress bar during execution
+        i = 0
         client: GoogleAdsClient
         client = port_object.client
         account_id = port_object.spec.account_id
-        
+
         ####################
         # [START QUERY]
         ####################
         # TODO Implement config window with a query builder
         execution_query = self.define_query()
         LOGGER.warning(f"this is the query:{execution_query}")
-        
-        #TODO move the pre-built queries to a separte file in the util folder pre-built_ad_queries.py
+
+        # TODO move the pre-built queries to a separte file in the util folder pre-built_ad_queries.py
         DEFAULT_QUERY = """
         SELECT
             campaign.id,
@@ -189,94 +201,105 @@ class GoogleAdsQuery:
             metrics.clicks,
             metrics.cost_micros
         FROM campaign"""
-        
+
         if execution_query == "":
-            exec_context.set_warning("Used default query because you didn't provide one.")
+            exec_context.set_warning(
+                "Used default query because you didn't provide one."
+            )
             execution_query = DEFAULT_QUERY
-      
+
         ga_service: GoogleAdsServiceClient
         ga_service = client.get_service("GoogleAdsService")
 
         search_request = client.get_type("SearchGoogleAdsStreamRequest")
         search_request.customer_id = account_id
         search_request.query = execution_query
-        
 
         df = pd.DataFrame()
         try:
-            response_stream = ga_service.search_stream(search_request,timeout=self.custom_timeout)
+            response_stream = ga_service.search_stream(
+                search_request, timeout=self.custom_timeout
+            )
             data = []
             header_array = []
-          
+
             for batch in response_stream:
-                
+
                 header_array = [field for field in batch.field_mask.paths]
-                number_of_results = len([result for result in batch.results])                           
-               
+                number_of_results = len([result for result in batch.results])
+
                 for row in batch.results:
                     data_row = []
                     row: GoogleAdsRow
                     for field in batch.field_mask.paths:
-                        
+
                         # Split the attribute_name string into parts
                         attribute_parts = field.split(".")
-                        
+
                         # Initialize the object to start the traversal
                         attribute_value = row
-                       
+
                         # Traverse the attribute parts and access the attributes
                         for part in attribute_parts:
-                            
-                            #query-fix for ADGROUP and AD queries: we are iterating over the attribute_value (type = class) line
-                            #and using the field name splitted to access the values with the getattr(method), 
-                            #when trying to use 'type' there is not any attr called like this
-                            #in the class attribute_value, so adding and underscore fix this.
-                            #temp fix: we don't know how to check before the attr name of the class attribute value
-                            if part=="type":
-                                part= part+"_"
-                           
+
+                            # query-fix for ADGROUP and AD queries: we are iterating over the attribute_value (type = class) line
+                            # and using the field name splitted to access the values with the getattr(method),
+                            # when trying to use 'type' there is not any attr called like this
+                            # in the class attribute_value, so adding and underscore fix this.
+                            # temp fix: we don't know how to check before the attr name of the class attribute value
+                            if part == "type":
+                                part = part + "_"
+
                             attribute_value = getattr(attribute_value, part)
-                            
-                            #query-fix for AD query. Explanation for the below if: when fetching the field "final_urls" from the response_stream, it returned a [] type that was not in any Python readable type.
-                            #indeed the type was this protobuf RepeatedScalarFieldContainer. The goal of the if clause is to convert the empty list to empty strings and extract the RepeatedScalarFieldContainer( similar to list type) element
-                            #for reference https://googleapis.dev/python/protobuf/latest/google/protobuf/internal/containers.html
-                            if type(attribute_value) is _message.RepeatedScalarContainer:
-                                attribute_value : RepeatedScalarFieldContainer
+
+                            # query-fix for AD query. Explanation for the below if: when fetching the field "final_urls" from the response_stream, it returned a [] type that was not in any Python readable type.
+                            # indeed the type was this protobuf RepeatedScalarFieldContainer. The goal of the if clause is to convert the empty list to empty strings and extract the RepeatedScalarFieldContainer( similar to list type) element
+                            # for reference https://googleapis.dev/python/protobuf/latest/google/protobuf/internal/containers.html
+                            if (
+                                type(attribute_value)
+                                is _message.RepeatedScalarContainer
+                            ):
+                                attribute_value: RepeatedScalarFieldContainer
                                 if len(attribute_value) == 0:
                                     attribute_value = ""
                                 else:
-                                    attribute_value = attribute_value.pop(0)         
+                                    attribute_value = attribute_value.pop(0)
                         data_row.append(attribute_value)
                     data.append(data_row)
                     i += 1
                     utils.check_canceled(exec_context)
-                    exec_context.set_progress(i/number_of_results,"We are preparing your data \U0001F468\u200D\U0001F373")
+                    exec_context.set_progress(
+                        i / number_of_results,
+                        "We are preparing your data \U0001F468\u200D\U0001F373",
+                    )
             df = pd.DataFrame(data, columns=header_array)
-            
+
         except GoogleAdsException as ex:
             status_error = ex.error.code().name
             error_messages = ""
             for error in ex.failure.errors:
                 error_messages = " ".join([error.message])
-            error_first_part= " ".join(["Failed with status",status_error,])
+            error_first_part = " ".join(
+                [
+                    "Failed with status",
+                    status_error,
+                ]
+            )
             error_second_part = " ".join([error_messages])
-            error_to_raise = ". ".join([error_first_part,error_second_part])
+            error_to_raise = ". ".join([error_first_part, error_second_part])
             raise knext.InvalidParametersError(error_to_raise)
         ##################
         # [END QUERY]
         ##################
         return knext.Table.from_pandas(pd.DataFrame(df))
-   
+
     def define_query(self):
         query = ""
-        
+
         if self.query_mode == "MANUALLY":
             query = self.query_custom
         elif self.query_mode == "PREBUILT":
-            query = pb_queries.get_query(self.query_prebuilt_name,self.date_start_query,self.date_end_query)
+            query = pb_queries.get_query(
+                self.query_prebuilt_name, self.date_start_query, self.date_end_query
+            )
         return query
-
-    
- 
-
-   
