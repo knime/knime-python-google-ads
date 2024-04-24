@@ -45,6 +45,10 @@
 import logging
 import knime.extension as knext
 from google.oauth2.credentials import Credentials
+
+# Check if it necessary to import this class to handle the authentication via service account.
+# from google.oauth2.service_account import Credentials as Credentials_service
+
 import google_ads_ext
 from google.ads.googleads.client import GoogleAdsClient
 from google.ads.googleads.v15.services.services.google_ads_service.client import (
@@ -67,148 +71,6 @@ from google.ads.googleads.errors import GoogleAdsException
 
 LOGGER = logging.getLogger(__name__)
 
-"""
-class DeveloperTokenRetrieval(knext.EnumParameterOptions):
-    MANUALLY = (
-        "Manual",
-        "Write down the developer token directly into the node configuration.",
-    )
-    CREDENTIALS = (
-        "Credentials",
-        "Reads the developer token from the credentials configuration node.",
-    )
-
-
-def manager_customer_ids(ctx: knext.DialogCreationContext):
-    # Accessing access token from input credential port via DialogCreationContext
-    specs = ctx.get_input_specs()
-    auth_spec = specs[0] if specs else None
-    credentials = Credentials(token=auth_spec.auth_parameters)
-
-    # Accessing credentials password:
-    credentials_name = ctx.get_credential_names()
-    developer_token = ctx.get_credentials(credentials_name[0]).password
-
-    # Building the object to make the request: list accessible customers giving the current authorization
-
-    client: GoogleAdsClient
-    client = GoogleAdsClient(credentials=credentials, developer_token=developer_token)
-    customer_service: CustomerServiceClient
-    customer_service = client.get_service("CustomerService")
-
-    # Accessing customer IDs
-    accessible_customers: ListAccessibleCustomersResponse
-    accessible_customers = customer_service.list_accessible_customers()
-    resource_names = accessible_customers.resource_names
-
-    # Extract numerical IDs from resource names
-    customer_ids = [str(name.split("/")[-1]) for name in resource_names]
-
-    return customer_ids
-
-
-# [END list_accessible_customers]
-
-
-def retrieve_customer_ids(ctx: knext.DialogCreationContext) -> list[str]:
-    query = """"""
-    SELECT 
-        customer_client.id
-    FROM customer_client """"""
-
-    # Accessing access token from input credential port via DialogCreationContext
-    specs = ctx.get_input_specs()
-    auth_spec = specs[0] if specs else None
-    credentials = Credentials(token=auth_spec.auth_parameters)
-
-    # Accessing credentials password:
-    credentials_name = ctx.get_credential_names()
-    developer_token = ctx.get_credentials(credentials_name[0]).password
-
-    # Building the object to make the request: Google ads service giving the current authorization
-    client: GoogleAdsClient
-    client = GoogleAdsClient(credentials=credentials, developer_token=developer_token)
-    ga_service: GoogleAdsServiceClient
-    ga_service = client.get_service("GoogleAdsService")
-
-    search_request = client.get_type("SearchGoogleAdsStreamRequest")
-    search_request.customer_id = ""
-    search_request.query = query
-    LOGGER.warning("Setting query customer id done.")
-
-    df = pd.DataFrame()
-    try:
-        response_stream = ga_service.search_stream(search_request)
-        data = []
-        header_array = []
-        for batch in response_stream:
-            header_array = [field for field in batch.field_mask.paths]
-            for row in batch.results:
-                data_row = []
-                row: GoogleAdsRow
-                for field in batch.field_mask.paths:
-                    LOGGER.warning(
-                        f"trying to understand {field}"
-                    )  # OUTPUT: customer_client.id
-                    # Split the attribute_name string into parts
-                    attribute_parts = field.split(".")
-                    LOGGER.warning(
-                        f"what's happening here? {attribute_parts}"
-                    )  # OUTPUT: ['customer_client', 'id']
-                    # Initialize the object to start the traversal
-                    attribute_value = row
-                    # Traverse the attribute parts and access the attributes
-                    LOGGER.warning(
-                        f"Second Loop print {attribute_value}"
-                    )
-                    for part in attribute_parts:
-                        attribute_value = getattr(attribute_value, part)
-                    data_row.append(str(attribute_value))
-                    LOGGER.warning(f"third loop print {attribute_value}")  # OUPTUT:
-                data.append(data_row)
-
-        df = pd.DataFrame(data, columns=header_array)
-
-    except GoogleAdsException as ex:
-        LOGGER.warning(  # TODO New error message # NOSONAR
-            "Google Ads API request failed. Please check your query and credentials."
-        )
-        LOGGER.warning(ex)
-    df_list = pd.DataFrame(df)["customer_client.id"].tolist()
-    LOGGER.warning("customer id list")
-    LOGGER.warning(df_list)
-    return df_list
-
-
-def _create_specific_manager_customer_ids_list() -> knext.StringParameter:
-    return knext.StringParameter(
-        label="Manager Customer Id",
-        description="The login-customer-id is equivalent to choosing an account in the Google Ads UI after signing in or clicking on your profile image at the top right.",
-        choices=lambda c: manager_customer_ids(c),
-        default_value="Unselected",
-        is_advanced=False,
-    )
-
-
-def _create_specific_customer_ids_list() -> knext.StringParameter:
-    return knext.StringParameter(
-        label="Customer Id",
-        description="",
-        choices=lambda c: retrieve_customer_ids(c),
-        default_value="Unselected",
-        is_advanced=False,
-    )
-
-
-@knext.parameter_group(label="")
-class GAdsconnectorLoaderInputSettings:
-    manager_customer_id = _create_specific_manager_customer_ids_list()
-
-
-@knext.parameter_group(label="")
-class GAdsconnectorLoaderCustomerIDs:
-    customer_id_retrieval = _create_specific_customer_ids_list()
-"""
 
 @knext.node(
     name="Google Ads Connector",
@@ -232,69 +94,49 @@ class GoogleAdsConnector:
     Long description of the node.
     Can be multiple lines.
     """
-    """
-    dev_token_retrieval = knext.EnumParameter(
-        "Connection method",
-        "Input the necessary parameters to stablish a connection manually or using a Credentials Configuration node.",
-        DeveloperTokenRetrieval.MANUALLY.name,
-        DeveloperTokenRetrieval,
-        style=knext.EnumParameter.Style.VALUE_SWITCH,
-    )
 
-    LOGGER.warning(f"testing a warning here {dev_token_retrieval}")
-    """
     developer_token = knext.StringParameter(
         label="Developer Token",
         description="The Google developer token is needed to connect to the Google Ads API. It can be obtained following [this docucmentation](https://developers.google.com/google-ads/api/docs/get-started/dev-token?hl=en).",
         default_value="",
-    )#.rule(knext.OneOf(dev_token_retrieval, [DeveloperTokenRetrieval.MANUALLY.name]),knext.Effect.SHOW,)
+    )  # .rule(knext.OneOf(dev_token_retrieval, [DeveloperTokenRetrieval.MANUALLY.name]),knext.Effect.SHOW,)
 
     manager_customer_id = knext.StringParameter(
         label="Manager Customer Id",
         description="The login-customer-id is equivalent to choosing an account in the Google Ads UI after signing in or clicking on your profile image at the top right.",
         default_value="",
-    )#.rule(knext.OneOf(dev_token_retrieval, [DeveloperTokenRetrieval.MANUALLY.name]),knext.Effect.SHOW,)
+    )  # .rule(knext.OneOf(dev_token_retrieval, [DeveloperTokenRetrieval.MANUALLY.name]),knext.Effect.SHOW,)
 
     account_id = knext.StringParameter(
         label="Account Id",
         description="The account id of your target campaigns.",
         default_value="",
-    )#.rule(knext.OneOf(dev_token_retrieval, [DeveloperTokenRetrieval.MANUALLY.name]),knext.Effect.SHOW,)
+    )  # .rule(knext.OneOf(dev_token_retrieval, [DeveloperTokenRetrieval.MANUALLY.name]),knext.Effect.SHOW,)
 
-    """
-    input_settings = GAdsconnectorLoaderInputSettings().rule(
-        knext.OneOf(dev_token_retrieval, [DeveloperTokenRetrieval.CREDENTIALS.name]),
-        knext.Effect.SHOW,
-    )
-    LOGGER.warning(f"Showing up the input setting string {input_settings}")
-
-    customer_id_settings = GAdsconnectorLoaderCustomerIDs().rule(
-        knext.OneOf(input_settings, [0])
-        and knext.OneOf(dev_token_retrieval, [DeveloperTokenRetrieval.MANUALLY.name]),
-        knext.Effect.HIDE,
-    )
-    """
     def configure(
         self,
         configuration_context: knext.ConfigurationContext,
         credential_port: knext.PortObjectSpec,
     ):
-        return GoogleAdObjectSpec("", [])
+        return GoogleAdObjectSpec("", [], "")
 
     def execute(
         self, exec_context: knext.ExecutionContext, credential: knext.PortObject
     ):
-        # Combine credentials with customer ID
-        # Use the access token provided in the input port. The token gets automatically refreshed by the upstream Google Authenticator node.
-        credentials = Credentials(token=str(credential.spec.auth_parameters))
+
         LOGGER.warning(f"access_token: {credential.spec.auth_parameters}")
         LOGGER.warning("auth_parameter")
+        LOGGER.warning(f"auth_schema {credential.spec.auth_schema}")
+        LOGGER.warning(f"deserialize {credential.spec.deserialize}")
         LOGGER.warning(dir(credential.spec))
         LOGGER.warning(f"What developer token I am passing here {self.developer_token}")
 
         # Combine credentials with customer ID
         # Use the access token provided in the input port. The token gets automatically refreshed by the upstream Google Authenticator node.
         credentials = Credentials(token=str(credential.spec.auth_parameters))
+
+        # TODO Implement a method to use the service account access to make calls to the Google Ads api
+        # https://developers.google.com/identity/protocols/oauth2/service-account#python_1
 
         client = GoogleAdsClient(
             credentials=credentials,
@@ -303,8 +145,11 @@ class GoogleAdsConnector:
         )
         LOGGER.warning(f" GoogleAdsClient object: {dir(client)}")
 
+        mcc = manager_customer_ids(client)
+        LOGGER.warning(f" testing client built {mcc[0]}")
+
         campaign_ids = get_campaigns_id(client, cleanup_ids(self.account_id))
-       
+
         test_connection(client)
 
         # test_customer_id(self.customer_id)
@@ -312,6 +157,10 @@ class GoogleAdsConnector:
         LOGGER.warning(
             f"Retrieving connection information...\nDeveloper token: {client.developer_token}\nCustomer ID: {self.account_id}"
         )
+
+        # TODO Explore the following scenario
+        # 'Get local values ... okay maybe too hacky and too fragile
+        # Pass the whole client or some token in the spec? Is that dangerous?
 
         port_object = GoogleAdConnectionObject(
             GoogleAdObjectSpec(
@@ -323,10 +172,13 @@ class GoogleAdsConnector:
         )
         return port_object
 
-def cleanup_ids(id: str)->str:
+
+def cleanup_ids(id: str) -> str:
     if id.strip() == "":
-        raise knext.InvalidParametersError("Please review your Manager Customer Id and your Account Id")
-    return id.replace("-","").strip()
+        raise knext.InvalidParametersError(
+            "Please review your Manager Customer Id and your Account Id"
+        )
+    return id.replace("-", "").strip()
 
 
 def test_connection(client: GoogleAdsClient):
@@ -387,11 +239,33 @@ def get_campaigns_id(client: GoogleAdsClient, account_id: str) -> list[str]:
         error_messages = ""
         for error in ex.failure.errors:
             error_messages = " ".join([error.message])
-        error_first_part= " ".join(["Failed with status",status_error,])
+        error_first_part = " ".join(
+            [
+                "Failed with status",
+                status_error,
+            ]
+        )
         error_second_part = " ".join([error_messages])
-        error_to_raise = ". ".join([error_first_part,error_second_part])
+        error_to_raise = ". ".join([error_first_part, error_second_part])
         raise knext.InvalidParametersError(error_to_raise)
-    
+
     df_list = pd.DataFrame(df)["campaign.id"].tolist()
     LOGGER.warning(df_list)
     return df_list
+
+
+# this function is to test the authentication via service account, delete after testing.
+def manager_customer_ids(client):
+    # Accessing access token from input credential port via DialogCreationContext
+    customer_service: CustomerServiceClient
+    customer_service = client.get_service("CustomerService")
+
+    # Accessing customer IDs
+    accessible_customers: ListAccessibleCustomersResponse
+    accessible_customers = customer_service.list_accessible_customers()
+    resource_names = accessible_customers.resource_names
+
+    # Extract numerical IDs from resource names
+    customer_ids = [str(name.split("/")[-1]) for name in resource_names]
+
+    return customer_ids
