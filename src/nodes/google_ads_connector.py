@@ -47,7 +47,7 @@ import knime.extension as knext
 from google.oauth2.credentials import Credentials
 
 # Check if it necessary to import this class to handle the authentication via service account.
-# from google.oauth2.service_account import Credentials as Credentials_service
+from google.oauth2.service_account import Credentials as Credentials_service
 
 import google_ads_ext
 from google.ads.googleads.client import GoogleAdsClient
@@ -118,22 +118,26 @@ class GoogleAdsConnector:
         configuration_context: knext.ConfigurationContext,
         credential_port: knext.PortObjectSpec,
     ):
-        return GoogleAdObjectSpec("", [], "")
+        return GoogleAdObjectSpec("", [])
 
     def execute(
         self, exec_context: knext.ExecutionContext, credential: knext.PortObject
     ):
 
         LOGGER.warning(f"access_token: {credential.spec.auth_parameters}")
+        LOGGER.warning(f"attributes of the port{dir(credential)}")
         LOGGER.warning("auth_parameter")
         LOGGER.warning(f"auth_schema {credential.spec.auth_schema}")
         LOGGER.warning(f"deserialize {credential.spec.deserialize}")
         LOGGER.warning(dir(credential.spec))
+        LOGGER.warning(dir(credential.getJavaClassName))
         LOGGER.warning(f"What developer token I am passing here {self.developer_token}")
 
         # Combine credentials with customer ID
         # Use the access token provided in the input port. The token gets automatically refreshed by the upstream Google Authenticator node.
+
         credentials = Credentials(token=str(credential.spec.auth_parameters))
+        # credentials = Credentials_service.
 
         # TODO Implement a method to use the service account access to make calls to the Google Ads api
         # https://developers.google.com/identity/protocols/oauth2/service-account#python_1
@@ -143,6 +147,7 @@ class GoogleAdsConnector:
             developer_token=self.developer_token.strip(),
             login_customer_id=cleanup_ids(self.manager_customer_id),
         )
+
         LOGGER.warning(f" GoogleAdsClient object: {dir(client)}")
 
         mcc = manager_customer_ids(client)
@@ -261,6 +266,7 @@ def manager_customer_ids(client):
     # Accessing customer IDs
     accessible_customers: ListAccessibleCustomersResponse
     accessible_customers = customer_service.list_accessible_customers()
+
     resource_names = accessible_customers.resource_names
 
     # Extract numerical IDs from resource names

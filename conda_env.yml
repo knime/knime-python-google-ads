@@ -7,3 +7,5 @@ dependencies:
   - knime-python-base
   - knime-extension
   - google-ads=23.1.0
+  - pip:
+    - google-api-python-client
