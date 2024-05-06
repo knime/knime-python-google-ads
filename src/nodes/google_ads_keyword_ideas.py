@@ -53,30 +53,40 @@ from util.common import (
     google_ad_port_type,
 )
 from google.ads.googleads.client import GoogleAdsClient
-from google.ads.googleads.v14.services.services.google_ads_service.client import (
+from google.ads.googleads.v16.services.services.google_ads_service.client import (
     GoogleAdsServiceClient,
 )
-from google.ads.googleads.v14.services.services.keyword_plan_idea_service.client import (
+from google.ads.googleads.v16.services.services.keyword_plan_idea_service.client import (
     KeywordPlanIdeaServiceClient,
 )
-from google.ads.googleads.v14.services.services.geo_target_constant_service.client import (
+from google.ads.googleads.v16.services.services.geo_target_constant_service.client import (
     GeoTargetConstantServiceClient,
 )
-from google.ads.googleads.v14.services.types.keyword_plan_idea_service import (
+from google.ads.googleads.v16.services.types.keyword_plan_idea_service import (
     GenerateKeywordIdeasRequest,
 )
-from google.ads.googleads.v14.enums.types.keyword_plan_competition_level import (
+from google.ads.googleads.v16.enums.types.keyword_plan_competition_level import (
     KeywordPlanCompetitionLevelEnum,
 )
-from google.ads.googleads.v14.enums.types.keyword_plan_network import (
+from google.ads.googleads.v16.enums.types.keyword_plan_network import (
     KeywordPlanNetworkEnum,
 )
+import util.utils as utils
 
 LOGGER = logging.getLogger(__name__)
 
 
 @knext.parameter_group(label="Select target column, the language and the location")
 class MySettings:
+    selected_column = knext.ColumnParameter(
+        "Keywords Column",
+        "KNIME table column containing the kewyords from which fetch the ideas with the search volume",
+        port_index=1,
+        include_row_key=False,
+        include_none_column=False,
+        since_version=None,
+    )
+
     location_id = knext.StringParameter(
         label="Location ID",
         description="Input your location ID",
@@ -89,15 +99,6 @@ class MySettings:
         description="Input the Language ID",
         default_value="1000",
         is_advanced=False,
-    )
-
-    selected_column = knext.ColumnParameter(
-        "Keywords Column",
-        "KNIME table column containing the kewyords from which fetch the ideas with the search volume",
-        port_index=1,
-        include_row_key=False,
-        include_none_column=False,
-        since_version=None,
     )
 
 
@@ -142,7 +143,7 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
 
         location_ids = [self.my_settings.location_id]
         selected_column = self.my_settings.selected_column
-        if self.my_settings.selected_column != "<none>":
+        if self.my_settings.selected_column != "":
             keyword_texts_df = input_table.to_pandas()
         else:
             exec_context.set_warning("No column selected")
@@ -151,68 +152,67 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
 
         LOGGER.warning(msg="check the keyword_texts object")
         LOGGER.warning(type(keyword_texts))
-        # TODO pass a KNIME table and transform here in a list, select also the column!! keyword_texts = keyword_processing.values.tolist() NOSONAR
 
+        # Creating the Google Ads Client object
+        LOGGER.warning(f"the googleadsclient object:{type(GoogleAdsClient)}")
         client: GoogleAdsClient
         client = port_object.client
-        customer_id = port_object.spec.customer_id
+        account_id = port_object.spec.account_id
 
         keyword_plan_idea_service: KeywordPlanIdeaServiceClient
         keyword_plan_idea_service = client.get_service("KeywordPlanIdeaService")
 
-        # TODO check this part and also the keyword_plan_network NOSONAR
-        # kwd_plan_competition: KeywordPlanCompetitionLevelEnum
-        # kwd_plan_competition = client.get_type("KeywordPlanCompetitionLevelEnum")
-        # keyword_competition_level_enum.status = (client.enums.kwd_plan_competition)
+        # This is a system for measuring a keyword's level of competition in ad placement.
+        # It's based on the number of advertisers bidding on that keyword compared to all other keywords on Google.
+        # The level can vary depending on location and Search Network targeting options.
+        # UNSPECIFIED = 0;UNKNOWN = 1;LOW = 2;MEDIUM = 3;HIGH = 4
 
-        keyword_plan_network = 3
-        # (
-        #     client.enums.KeywordPlanNetworkEnum.GOOGLE_SEARCH_AND_PARTNERS
-        # )
-        # client: GoogleAdsClient NOSONAR
-        # client = port_object.client
+        keyword_competition_level_enum: KeywordPlanCompetitionLevelEnum
+        keyword_competition_level_enum = client.enums.KeywordPlanCompetitionLevelEnum
+
+        # Container for enumeration of keyword plan forecastable network types
+        keyword_plan_network: KeywordPlanNetworkEnum
+        keyword_plan_network = (
+            client.enums.KeywordPlanNetworkEnum.GOOGLE_SEARCH_AND_PARTNERS
+        )
+
+        # List the location IDs
         location_rns = map_locations_ids_to_resource_names(self, client, location_ids)
+        LOGGER.warning(f"location_rns= {location_rns}")
+
+        # Returns a fully-qualified language_constant string.
         language_rn_get_service: GoogleAdsServiceClient
         language_rn_get_service = client.get_service("GoogleAdsService")
         language_rn = language_rn_get_service.language_constant_path(
             self.my_settings.language_id
         )
+        LOGGER.warning(f"Language id: {language_rn}")
 
-        # Either keywords or a page_url are required to generate keyword ideas
-        # so this raises an error if neither are provided.
-        if not keyword_texts:  # TODO or page_url): NOSONAR
-            raise ValueError(
-                "At least one of keywords"  # or page URL is required, " NOSONAR
-                "but neither was specified."
-            )
-
+        # [Preparing the request]
         # Only one of the fields "url_seed", "keyword_seed", or
         # "keyword_and_url_seed" can be set on the request, depending on whether
         # keywords, a page_url or both were passed to this function.
         request: GenerateKeywordIdeasRequest
         request = client.get_type("GenerateKeywordIdeasRequest")
-        request.customer_id = customer_id
+        request.customer_id = account_id
         request.language = language_rn
-        request.geo_target_constants = location_rns
+        request.geo_target_constants.extend(location_rns)
         request.include_adult_keywords = False
         request.keyword_plan_network = keyword_plan_network
 
         # TODO admit a website URL as input NOSONAR
         # To generate keyword ideas with only a page_url and no keywords we need
         # to initialize a UrlSeed object with the page_url as the "url" field.
-        # if not keyword_texts and page_url:
         #     request.url_seed.url = page_url
 
         # To generate keyword ideas with only a list of keywords and no page_url
         # we need to initialize a KeywordSeed object and set the "keywords" field
         # to be a list of StringValue objects.
-        # if not keyword_texts.empty: #and not page_url:
         request.keyword_seed.keywords.extend(keyword_texts)
 
         # To generate keyword ideas using both a list of keywords and a page_url we
         # need to initialize a KeywordAndUrlSeed object, setting both the "url" and
         # "keywords" fields.
-        # if keyword_texts and page_url:
         #     request.keyword_and_url_seed.url = page_url
         #     request.keyword_and_url_seed.keywords.extend(keyword_texts)
 
@@ -221,33 +221,45 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
         )
         LOGGER.warning("let'see what it is")
         LOGGER.warning(type(keyword_ideas))
-        # for idea in keyword_ideas: NOSONAR
-        #     competition_value = idea.keyword_idea_metrics.competition.name
-        #     print(
-        #         f'Keyword idea text "{idea.text}" has '
-        #         f'"{idea.keyword_idea_metrics.avg_monthly_searches}" '
-        #         f'average monthly searches and "{competition_value}" '
-        #         "competition.\n"
-        #     )
 
         # Create empty lists to store data
         keywords = []
         avg_monthly_searches = []
         competition_values = []
+        competition_index = []
+        average_cpc_micros = []
+        high_top_of_page_bid_micros = []
+        low_top_of_page_bid_micros = []
+        monthly_search_volumes = []
 
         # Extract data and populate lists
         for idea in keyword_ideas:
-            # keywords.append(idea['text']) NOSONAR
-            # avg_monthly_searches.append(idea['keyword_idea_metrics']['avg_monthly_searches'])
-            # competition_values.append(idea['keyword_idea_metrics']['competition']['name'])
+
             keywords.append(idea.text)
             avg_monthly_searches.append(idea.keyword_idea_metrics.avg_monthly_searches)
-            competition_values.append(idea.keyword_idea_metrics.competition.name)
+            competition_values.append(idea.keyword_idea_metrics.competition)
+            competition_index.append(idea.keyword_idea_metrics.competition_index)
+            average_cpc_micros.append(idea.keyword_idea_metrics.average_cpc_micros)
+            high_top_of_page_bid_micros.append(
+                idea.keyword_idea_metrics.high_top_of_page_bid_micros
+            )
+            low_top_of_page_bid_micros.append(
+                idea.keyword_idea_metrics.low_top_of_page_bid_micros
+            )
+            monthly_search_volumes.append(
+                idea.keyword_idea_metrics.monthly_search_volumes
+            )
+
         # Create a DataFrame from the lists
         data = {
             "Keyword": keywords,
-            "Avg_Monthly_Searches": avg_monthly_searches,
+            "Avg Monthly Searches": avg_monthly_searches,
             "Competition": competition_values,
+            "Competition Index": competition_index,
+            "Average Cost per Click": average_cpc_micros,
+            "Top of Page Bid (High Range)": high_top_of_page_bid_micros,
+            "Top of Page Bid (Low Range)": low_top_of_page_bid_micros,
+            # "Monthly Search Volumen": monthly_search_volumes,
         }
         LOGGER.warning(msg="check the data df")
         df = pd.DataFrame(data)
