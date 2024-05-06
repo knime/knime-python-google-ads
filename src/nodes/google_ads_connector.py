@@ -134,10 +134,13 @@ class GoogleAdsConnector:
         LOGGER.warning(f"What developer token I am passing here {self.developer_token}")
 
         # Combine credentials with customer ID
-        # Use the access token provided in the input port. The token gets automatically refreshed by the upstream Google Authenticator node.
-
-        credentials = Credentials(token=str(credential.spec.auth_parameters))
-        # credentials = Credentials_service.
+        # Use the access token provided in the input port.
+        # Token refresh is handled by the provided refresh handler that requests the token from the input port.
+        credentials = Credentials(
+            token=str(credential.spec.auth_parameters),
+            expiry=credential.spec.expires_after,
+            refresh_handler=get_refresh_handler(credential.spec),
+        )
 
         # TODO Implement a method to use the service account access to make calls to the Google Ads api
         # https://developers.google.com/identity/protocols/oauth2/service-account#python_1
@@ -174,6 +177,11 @@ class GoogleAdsConnector:
             client=client,
         )
         return port_object
+
+
+def get_refresh_handler(spec: knext.CredentialPortObjectSpec) -> callable:
+    """Returns a function that returns the access token and the expiration time of the access token."""
+    return lambda request, scopes: (spec.auth_parameters, spec.expires_after)
 
 
 def cleanup_ids(id: str) -> str:
