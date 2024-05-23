@@ -71,13 +71,14 @@ from google.ads.googleads.v16.enums.types.keyword_plan_competition_level import 
 from google.ads.googleads.v16.enums.types.keyword_plan_network import (
     KeywordPlanNetworkEnum,
 )
+from datetime import date, datetime
 import util.utils as utils
 
 LOGGER = logging.getLogger(__name__)
 
 
 @knext.parameter_group(label="Select target column, the language and the location")
-class MySettings:
+class MySettings:  # TODO Rename
     selected_column = knext.ColumnParameter(
         "Keywords Column",
         "KNIME table column containing the kewyords from which fetch the ideas with the search volume",
@@ -100,6 +101,60 @@ class MySettings:
         default_value="1000",
         is_advanced=False,
     )
+    # Here is the website with the reference for the managing the dates in the Google Ads API: https://developers.google.com/google-ads/api/reference/rpc/v16/HistoricalMetricsOptions
+    date_start = knext.DateTimeParameter(
+        label="Start date",
+        description="Define the start date for the historical metrics.",
+        is_advanced=False,
+        show_date=True,
+        show_time=False,
+        show_seconds=False,
+        show_milliseconds=False,
+        default_value=date.today().replace(day=1, month=date.today().month - 1),
+    )
+
+    date_end = knext.DateTimeParameter(
+        label="End date",
+        description="Define the end date for the historical metrics.",
+        is_advanced=False,
+        show_date=True,
+        show_time=False,
+        show_seconds=False,
+        show_milliseconds=False,
+        default_value=date.today().replace(day=1, month=date.today().month - 1),
+    )
+
+    @date_start.validator
+    def validate_date_start(value):
+        if type(value) == str:
+            try:
+                value = datetime.strptime(value, "%Y-%m-%dT%H:%M:%S.%fZ").date()
+            except ValueError:
+                value = datetime.strptime(value, "%Y-%m-%dZ").date()
+        if value.month == date.today().month:
+            raise ValueError(
+                "The start date cannot be set up for the current month. Please set a start date at least one month ahead."
+            )
+        elif datediff_in_years(value, date.today()) > 4:
+            raise ValueError(
+                "The start date cannot be set up for a date greater than four years from the current date. Please set a start date within the last four years."
+            )
+
+    @date_end.validator
+    def validate_date_end(value):
+        if type(value) == str:
+            try:
+                value = datetime.strptime(value, "%Y-%m-%dT%H:%M:%S.%fZ").date()
+            except ValueError:
+                value = datetime.strptime(value, "%Y-%m-%dZ").date()
+        if value.month == date.today().month:
+            raise ValueError(
+                "The end date cannot be set up for the current month. Please set an end date at least one month ahead."
+            )
+        elif datediff_in_years(value, date.today()) > 4:
+            raise ValueError(
+                "The end date cannot be set up for a date greater than four years from the current date. Please set an end date within the last four years."
+            )
 
 
 @knext.node(
@@ -177,7 +232,7 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
         )
 
         # List the location IDs
-        location_rns = map_locations_ids_to_resource_names(self, client, location_ids)
+        location_rns = self.map_locations_ids_to_resource_names(client, location_ids)
         LOGGER.warning(f"location_rns= {location_rns}")
 
         # Returns a fully-qualified language_constant string.
@@ -199,6 +254,23 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
         request.geo_target_constants.extend(location_rns)
         request.include_adult_keywords = False
         request.keyword_plan_network = keyword_plan_network
+
+        # Properly create and set the year_month_range within historical_metrics_options
+        historical_metrics_options = client.get_type("HistoricalMetricsOptions")
+        year_month_range = historical_metrics_options.year_month_range
+
+        year_month_range.start.year = (
+            self.my_settings.date_start.year
+        )  # what comes here? example! 2024
+        # The month is 1-based, so we need to add 1 to the month to get the correct value.
+        year_month_range.start.month = self.my_settings.date_start.month + 1
+        year_month_range.end.year = self.my_settings.date_end.year
+        year_month_range.end.month = self.my_settings.date_end.month + 1
+
+        LOGGER.warning(f"this the date range type:{type(historical_metrics_options)}")
+        LOGGER.warning(f"this is the range itself: {historical_metrics_options}")
+
+        request.historical_metrics_options.CopyFrom(historical_metrics_options)
 
         # TODO admit a website URL as input NOSONAR
         # To generate keyword ideas with only a page_url and no keywords we need
@@ -269,13 +341,17 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
 
         # [END generate_keyword_ideas]
 
+    def map_locations_ids_to_resource_names(
+        self, port_object: GoogleAdsClient, location_ids
+    ):
+        client = port_object
 
-def map_locations_ids_to_resource_names(self, port_object, location_ids):
+        build_resource_name_client: GeoTargetConstantServiceClient
+        build_resource_name_client = client.get_service("GeoTargetConstantService")
+        build_resource_name = build_resource_name_client.geo_target_constant_path
+        return [build_resource_name(location_id) for location_id in location_ids]
 
-    client: GoogleAdsClient
-    client = port_object
 
-    build_resource_name_client: GeoTargetConstantServiceClient
-    build_resource_name_client = client.get_service("GeoTargetConstantService")
-    build_resource_name = build_resource_name_client.geo_target_constant_path
-    return [build_resource_name(location_id) for location_id in location_ids]
+# Function to use in the date_start ane date_end validators to check if the input date is greater than four years from the current date
+def datediff_in_years(date1, date2):
+    return abs(date1.year - date2.year)
