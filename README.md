@@ -1,5 +1,10 @@
 # KNIME Nodes for Google Ads
 
+[![Jenkins](https://jenkins.knime.com/buildStatus/icon?job=knime-python-google-ads%2Fmaster)](https://jenkins.knime.com/job/knime-python-google-ads/job/master)
+
+This repository is maintained by Diego Rodríguez and Tobias Koetter.
+
+
 This repository contains the source code of the KNIME Nodes for Google Ads for [KNIME Analytics Platform](https://www.knime.com/knime-analytics-platform).
 
 ## Development notes
