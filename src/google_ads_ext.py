@@ -46,7 +46,7 @@
 import knime.extension as knext
 
 main_category = knext.category(
-    path="/community",
+    path="/labs",
     level_id="gads_ext",
     name="Google Ads",
     description="Nodes to manage your Google Adwords campaigns",
@@ -58,4 +58,3 @@ import nodes.google_ads_query
 import nodes.google_ads_create_ad_group
 import nodes.google_ads_keyword_ideas
 import nodes.google_ads_create_campaign
-#import nodes.google_ads_create_campaign

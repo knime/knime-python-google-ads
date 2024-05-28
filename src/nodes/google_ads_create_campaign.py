@@ -54,48 +54,58 @@ import uuid
 from google.ads.googleads.client import GoogleAdsClient
 from google.ads.googleads.errors import GoogleAdsException
 from google.ads.googleads.v14.services.types.campaign_budget_service import (
-   CampaignBudgetOperation
+    CampaignBudgetOperation,
 )
 from google.ads.googleads.v14.services.services.campaign_service import (
-    CampaignServiceClient
+    CampaignServiceClient,
 )
 from google.ads.googleads.v14.services.services.campaign_budget_service import (
-    CampaignBudgetServiceClient
+    CampaignBudgetServiceClient,
 )
-from google.ads.googleads.v14.services.types.campaign_service import (
-    CampaignOperation
-)
+from google.ads.googleads.v14.services.types.campaign_service import CampaignOperation
 from google.ads.googleads.v14.enums.types.budget_delivery_method import (
-    BudgetDeliveryMethodEnum
+    BudgetDeliveryMethodEnum,
 )
 from google.ads.googleads.v14.enums.types.advertising_channel_type import (
-    AdvertisingChannelTypeEnum
+    AdvertisingChannelTypeEnum,
 )
-from google.ads.googleads.v14.enums.types.campaign_status import (
-    CampaignStatusEnum
-)
+from google.ads.googleads.v14.enums.types.campaign_status import CampaignStatusEnum
 from util.common import (
     GoogleAdObjectSpec,
     GoogleAdConnectionObject,
     google_ad_port_type,
-    )
+)
+
 LOGGER = logging.getLogger(__name__)
 
 
 _DATE_FORMAT = "%Y%m%d"
 
+
 @knext.parameter_group(label="Campaign settings")
-#TODO Add as a parameter: Campaign name (flow variable), Bidding strategy, Network type
+# TODO Add as a parameter: Campaign name (flow variable), Bidding strategy, Network type
 class CampaignSettings:
     class CampaignType(knext.EnumParameterOptions):
-        SEARCH = ("Search", "Get in front of high-intent customers at the right time on Google Search.")
-        PERFORMANCE_MAX = ("Performance Max", "Reach audiences across all of Google with a single campaign.")
-        DISPLAY = ("Display", "Reach customers across 3 million sites and apps with engaging creative.")
-        SHOPPING = ("Shopping","Showcase your products to shoppers as they explore what to buy")
-        VIDEO = ("Video","Reach viewers on YouTube and get conversions")
-        DEMAND_GEN = ("Demand Gen","Run ads on YouTube, Gmail, Discover, and more")
+        SEARCH = (
+            "Search",
+            "Get in front of high-intent customers at the right time on Google Search.",
+        )
+        PERFORMANCE_MAX = (
+            "Performance Max",
+            "Reach audiences across all of Google with a single campaign.",
+        )
+        DISPLAY = (
+            "Display",
+            "Reach customers across 3 million sites and apps with engaging creative.",
+        )
+        SHOPPING = (
+            "Shopping",
+            "Showcase your products to shoppers as they explore what to buy",
+        )
+        VIDEO = ("Video", "Reach viewers on YouTube and get conversions")
+        DEMAND_GEN = ("Demand Gen", "Run ads on YouTube, Gmail, Discover, and more")
 
-    campaign_type= knext.EnumParameter(
+    campaign_type = knext.EnumParameter(
         label="Select a campaign type",
         description="Your campaign type determines the places online where customers will find your ads.",
         default_value=CampaignType.SEARCH.name,
@@ -104,7 +114,7 @@ class CampaignSettings:
 
 
 @knext.node(
-    name="Google Ads Campaign Creator",
+    name="Google Ads Campaign Creator (Labs)",
     node_type=knext.NodeType.MANIPULATOR,
     icon_path="icons/gads-icon.png",
     category=google_ads_ext.main_category,
@@ -115,19 +125,24 @@ class CampaignSettings:
     google_ad_port_type,
 )
 
-#TODO set campaign Goals and Conversion Goals???
-
+# TODO set campaign Goals and Conversion Goals???
 
 
 class GoogleAdsCampaignCreator(knext.PythonNode):
 
     campaign_settings = CampaignSettings()
 
-    def configure(self, configure_context: knext.ConfigurationContext, spec: GoogleAdObjectSpec):
+    def configure(
+        self, configure_context: knext.ConfigurationContext, spec: GoogleAdObjectSpec
+    ):
         # TODO Check and throw config error maybe if spec.customer_id is not a string or does not have a specific format NOSONAR
         pass
 
-    def execute(self, exec_context: knext.ExecutionContext, port_object: GoogleAdConnectionObject):
+    def execute(
+        self,
+        exec_context: knext.ExecutionContext,
+        port_object: GoogleAdConnectionObject,
+    ):
 
         client: GoogleAdsClient
         client = port_object.client
@@ -143,18 +158,18 @@ class GoogleAdsCampaignCreator(knext.PythonNode):
         campaign_budget_operation = client.get_type("CampaignBudgetOperation")
         campaign_budget = campaign_budget_operation.create
         campaign_budget.name = f"Campaign test diego {uuid.uuid4()}"
-        campaign_budget.delivery_method = BudgetDeliveryMethodEnum.BudgetDeliveryMethod.STANDARD
+        campaign_budget.delivery_method = (
+            BudgetDeliveryMethodEnum.BudgetDeliveryMethod.STANDARD
+        )
         # campaign_budget.delivery_method = ( NOSONAR
         #     client.enums.BudgetDeliveryMethodEnum.STANDARD
         # )
         campaign_budget.amount_micros = 500000
 
         # Add budget. TODO: add exception rule here
-        campaign_budget_response = (
-            campaign_budget_service.mutate_campaign_budgets(
-                customer_id=customer_id, operations=[campaign_budget_operation]
-                )
-             )
+        campaign_budget_response = campaign_budget_service.mutate_campaign_budgets(
+            customer_id=customer_id, operations=[campaign_budget_operation]
+        )
         # try: NOSONAR
         #     campaign_budget_response = (
         #         campaign_budget_service.mutate_campaign_budgets(
@@ -173,7 +188,7 @@ class GoogleAdsCampaignCreator(knext.PythonNode):
         campaign.name = f"Interplanetary Cruise {uuid.uuid4()}"
         campaign.advertising_channel_type: AdvertisingChannelTypeEnum
         campaign.advertising_channel_type = self.campaign_settings.campaign_type
-        #TODO query to fetch which campaign type are allowed within the Google Ads Account ?? NOSONAR
+        # TODO query to fetch which campaign type are allowed within the Google Ads Account ?? NOSONAR
 
         # Recommendation: Set the campaign to PAUSED when creating it to prevent
         # the ads from immediately serving. Set to ENABLED once you've added
@@ -205,9 +220,11 @@ class GoogleAdsCampaignCreator(knext.PythonNode):
         # Add the campaign.
 
         campaign_response = campaign_service.mutate_campaigns(
-               customer_id=customer_id, operations=[campaign_operation]
-            )
-        LOGGER.warning(msg=(f"Created campaign {campaign_response.results[0].resource_name}."))
+            customer_id=customer_id, operations=[campaign_operation]
+        )
+        LOGGER.warning(
+            msg=(f"Created campaign {campaign_response.results[0].resource_name}.")
+        )
 
         # try: NOSONAR
         #     campaign_response = campaign_service.mutate_campaigns(
@@ -216,7 +233,6 @@ class GoogleAdsCampaignCreator(knext.PythonNode):
         #     print(f"Created campaign {campaign_response.results[0].resource_name}.")
         # except GoogleAdsException as ex:
         #     handle_googleads_exception(ex)
-
 
     # def handle_googleads_exception(exception): NOSONAR
     #     print(

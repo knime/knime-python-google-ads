@@ -103,7 +103,7 @@ class MySettings:
 
 
 @knext.node(
-    name="Google Ads Keyword Ideas",
+    name="Google Ads Keyword Ideas (Labs)",
     node_type=knext.NodeType.MANIPULATOR,
     icon_path="icons/google_ads_keyword_ideas_logo.png",
     category=google_ads_ext.main_category,

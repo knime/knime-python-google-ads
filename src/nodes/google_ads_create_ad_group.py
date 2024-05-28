@@ -85,7 +85,7 @@ def get_campaigns_id(ctx: knext.DialogCreationContext) -> list[str]:
 
 
 @knext.node(
-    name="Google Ads AdGroup Creator",
+    name="Google Ads AdGroup Creator (Labs)",
     node_type=knext.NodeType.MANIPULATOR,
     icon_path="icons/gads-icon.png",
     category=google_ads_ext.main_category,

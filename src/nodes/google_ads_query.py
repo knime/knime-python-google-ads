@@ -79,7 +79,7 @@ class QueryBuilderMode(knext.EnumParameterOptions):
 
 
 @knext.node(
-    name="Google Ads Query",
+    name="Google Ads Query (Labs)",
     node_type=knext.NodeType.MANIPULATOR,
     icon_path="icons/google_ads_query_logo.png",
     category=google_ads_ext.main_category,
