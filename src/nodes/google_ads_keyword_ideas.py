@@ -72,89 +72,11 @@ from google.ads.googleads.v16.enums.types.keyword_plan_network import (
     KeywordPlanNetworkEnum,
 )
 from datetime import date, datetime
+from dateutil.relativedelta import relativedelta
+
 import util.utils as utils
 
 LOGGER = logging.getLogger(__name__)
-
-
-@knext.parameter_group(label="Select target column, the language and the location")
-class MySettings:  # TODO Rename
-    selected_column = knext.ColumnParameter(
-        "Keywords Column",
-        "KNIME table column containing the kewyords from which fetch the ideas with the search volume",
-        port_index=1,
-        include_row_key=False,
-        include_none_column=False,
-        since_version=None,
-    )
-
-    location_id = knext.StringParameter(
-        label="Location ID",
-        description="Input your location ID",
-        default_value="1023191",
-        is_advanced=False,
-    )
-
-    language_id = knext.StringParameter(
-        label="Language Id",
-        description="Input the Language ID",
-        default_value="1000",
-        is_advanced=False,
-    )
-    # Here is the website with the reference for the managing the dates in the Google Ads API: https://developers.google.com/google-ads/api/reference/rpc/v16/HistoricalMetricsOptions
-    date_start = knext.DateTimeParameter(
-        label="Start date",
-        description="Define the start date for the historical metrics.",
-        is_advanced=False,
-        show_date=True,
-        show_time=False,
-        show_seconds=False,
-        show_milliseconds=False,
-        default_value=date.today().replace(day=1, month=date.today().month - 1),
-    )
-
-    date_end = knext.DateTimeParameter(
-        label="End date",
-        description="Define the end date for the historical metrics.",
-        is_advanced=False,
-        show_date=True,
-        show_time=False,
-        show_seconds=False,
-        show_milliseconds=False,
-        default_value=date.today().replace(day=1, month=date.today().month - 1),
-    )
-
-    @date_start.validator
-    def validate_date_start(value):
-        if type(value) == str:
-            try:
-                value = datetime.strptime(value, "%Y-%m-%dT%H:%M:%S.%fZ").date()
-            except ValueError:
-                value = datetime.strptime(value, "%Y-%m-%dZ").date()
-        if value.month == date.today().month:
-            raise ValueError(
-                "The start date cannot be set up for the current month. Please set a start date at least one month ahead."
-            )
-        elif datediff_in_years(value, date.today()) > 4:
-            raise ValueError(
-                "The start date cannot be set up for a date greater than four years from the current date. Please set a start date within the last four years."
-            )
-
-    @date_end.validator
-    def validate_date_end(value):
-        if type(value) == str:
-            try:
-                value = datetime.strptime(value, "%Y-%m-%dT%H:%M:%S.%fZ").date()
-            except ValueError:
-                value = datetime.strptime(value, "%Y-%m-%dZ").date()
-        if value.month == date.today().month:
-            raise ValueError(
-                "The end date cannot be set up for the current month. Please set an end date at least one month ahead."
-            )
-        elif datediff_in_years(value, date.today()) > 4:
-            raise ValueError(
-                "The end date cannot be set up for a date greater than four years from the current date. Please set an end date within the last four years."
-            )
 
 
 @knext.node(
@@ -175,18 +97,106 @@ class MySettings:  # TODO Rename
 @knext.output_table(name="Output Data", description="KNIME table with keyword ideas")
 class GoogleAdsKwdIdeas(knext.PythonNode):
 
-    my_settings = MySettings()
+    selected_column = knext.ColumnParameter(
+        "Keywords Column",
+        "KNIME table column containing the kewyords from which fetch the ideas with the search volume",
+        port_index=1,
+        include_row_key=False,
+        include_none_column=True,
+        since_version=None,
+    )
+
+    location_id = knext.StringParameter(
+        label="Location ID",
+        description="Input your location ID",
+        default_value="1023191",
+        is_advanced=False,
+    )
+
+    language_id = knext.StringParameter(
+        label="Language Id",
+        description="Input the Language ID",
+        default_value="1000",
+        is_advanced=False,
+    )
+    # Default value for the start date is thirteen months ago from the current date, because by default the historical metrics are set up for the last twelve (not including the current one) months.
+
+    thirteen_months_ago = date.today() - relativedelta(months=13)
+    default_start_value = thirteen_months_ago.replace(day=1)
+    LOGGER.warning(f"this is the default start value: {default_start_value}")
+
+    # Here is the website with the reference for the managing the dates in the Google Ads API: https://developers.google.com/google-ads/api/reference/rpc/v16/HistoricalMetricsOptions
+    date_start = knext.DateTimeParameter(
+        label="Start date",
+        description="Define the start date for the historical metrics.",
+        is_advanced=False,
+        show_date=True,
+        show_time=False,
+        show_seconds=False,
+        show_milliseconds=False,
+        default_value=default_start_value,
+    )
+
+    @date_start.validator
+    def validate_date_start(value):
+        if isinstance(value, str):
+            try:
+                value = datetime.strptime(value, "%Y-%m-%dT%H:%M:%S.%fZ").date()
+            except ValueError:
+                value = datetime.strptime(value, "%Y-%m-%dZ").date()
+        if value.month == date.today().month:
+            raise ValueError(
+                "The start date cannot be set up for the current month. Please set a start date at least one month ahead."
+            )
+        elif datediff_in_years(value, date.today()) > 4:
+            raise ValueError(
+                "The start date cannot be set up for a date greater than four years from the current date. Please set a start date within the last four years."
+            )
+
+    one_month_ago = date.today().replace(day=1, month=date.today().month - 1)
+    default_end_value = one_month_ago.replace(day=1)
+    LOGGER.warning(f"this is the default end value: {default_end_value}")
+
+    date_end = knext.DateTimeParameter(
+        label="End date",
+        description="Define the end date for the historical metrics.",
+        is_advanced=False,
+        show_date=True,
+        show_time=False,
+        show_seconds=False,
+        show_milliseconds=False,
+        default_value=default_end_value,
+    )
+
+    @date_end.validator
+    def validate_date_end(value):
+        if isinstance(value, str):
+            try:
+                value = datetime.strptime(value, "%Y-%m-%dT%H:%M:%S.%fZ").date()
+            except ValueError:
+                value = datetime.strptime(value, "%Y-%m-%dZ").date()
+        if value.month == date.today().month:
+            raise ValueError(
+                "The end date cannot be set up for the current month. Please set an end date at least one month ahead."
+            )
+        elif datediff_in_years(value, date.today()) > 4:
+            raise ValueError(
+                "The end date cannot be set up for a date greater than four years from the current date. Please set an end date within the last four years."
+            )
 
     def configure(
         self,
-        configure_context: knext.DialogCreationContext,
+        configure_context: knext.ConfigurationContext,
         spec: GoogleAdObjectSpec,
         input_table_schema: knext.Schema,
     ):
         # TODO Check and throw config error maybe if spec.customer_id is not a string or does not have a specific format NOSONAR
         # We will add one column of type double to the table
         # return input_table_schema.append(knext.Column(knext.string(), "Keyword Ideas"))
-        pass
+        if self.date_end < self.date_start:
+            raise ValueError(
+                "The end date cannot be set up for a date earlier than the start date. Please set an end date later than the start date."
+            )
 
     def execute(
         self,
@@ -196,9 +206,9 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
     ) -> knext.Table:
         # TODO make optional the page url provider to generate ideas also from there! NOSONAR
 
-        location_ids = [self.my_settings.location_id]
-        selected_column = self.my_settings.selected_column
-        if self.my_settings.selected_column != "":
+        location_ids = [self.location_id]
+        selected_column = self.selected_column
+        if self.selected_column is not None:
             keyword_texts_df = input_table.to_pandas()
         else:
             exec_context.set_warning("No column selected")
@@ -238,9 +248,7 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
         # Returns a fully-qualified language_constant string.
         language_rn_get_service: GoogleAdsServiceClient
         language_rn_get_service = client.get_service("GoogleAdsService")
-        language_rn = language_rn_get_service.language_constant_path(
-            self.my_settings.language_id
-        )
+        language_rn = language_rn_get_service.language_constant_path(self.language_id)
         LOGGER.warning(f"Language id: {language_rn}")
 
         # [Preparing the request]
@@ -259,13 +267,11 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
         historical_metrics_options = client.get_type("HistoricalMetricsOptions")
         year_month_range = historical_metrics_options.year_month_range
 
-        year_month_range.start.year = (
-            self.my_settings.date_start.year
-        )  # what comes here? example! 2024
+        year_month_range.start.year = self.date_start.year
         # The month is 1-based, so we need to add 1 to the month to get the correct value.
-        year_month_range.start.month = self.my_settings.date_start.month + 1
-        year_month_range.end.year = self.my_settings.date_end.year
-        year_month_range.end.month = self.my_settings.date_end.month + 1
+        year_month_range.start.month = self.date_start.month + 1
+        year_month_range.end.year = self.date_end.year
+        year_month_range.end.month = self.date_end.month + 1
 
         LOGGER.warning(f"this the date range type:{type(historical_metrics_options)}")
         LOGGER.warning(f"this is the range itself: {historical_metrics_options}")
