@@ -129,7 +129,7 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
     date_start = knext.DateTimeParameter(
         label="Start date",
         description="Define the start date for the historical metrics.",
-        is_advanced=False,
+        is_advanced=True,
         show_date=True,
         show_time=False,
         show_seconds=False,
@@ -160,7 +160,7 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
     date_end = knext.DateTimeParameter(
         label="End date",
         description="Define the end date for the historical metrics.",
-        is_advanced=False,
+        is_advanced=True,
         show_date=True,
         show_time=False,
         show_seconds=False,
@@ -183,6 +183,19 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
             raise ValueError(
                 "The end date cannot be set up for a date greater than four years from the current date. Please set an end date within the last four years."
             )
+
+    include_adult_keywords = knext.BoolParameter(
+        label="Include Adult Keywords",
+        description="Include adult keywords in the keyword ideas results. Default is False.",
+        default_value=False,
+        is_advanced=True,
+    )
+    include_average_cpc = knext.BoolParameter(
+        label="Include Average CPC",
+        description="Indicates whether to include average cost per click value. Average CPC is provided only for legacy support. Default is True.",
+        default_value=True,
+        is_advanced=True,
+    )
 
     def configure(
         self,
@@ -262,6 +275,7 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
         request.geo_target_constants.extend(location_rns)
         request.include_adult_keywords = False
         request.keyword_plan_network = keyword_plan_network
+        request.include_adult_keywords = self.include_adult_keywords
 
         # Properly create and set the year_month_range within historical_metrics_options
         historical_metrics_options = client.get_type("HistoricalMetricsOptions")
@@ -277,6 +291,9 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
         LOGGER.warning(f"this is the range itself: {historical_metrics_options}")
 
         request.historical_metrics_options.CopyFrom(historical_metrics_options)
+        request.historical_metrics_options.include_average_cpc = (
+            self.include_average_cpc
+        )
 
         # TODO admit a website URL as input NOSONAR
         # To generate keyword ideas with only a page_url and no keywords we need
@@ -309,35 +326,54 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
         high_top_of_page_bid_micros = []
         low_top_of_page_bid_micros = []
         monthly_search_volumes = []
+        total_search_volume = 0
 
         # Extract data and populate lists
         for idea in keyword_ideas:
 
             keywords.append(idea.text)
             avg_monthly_searches.append(idea.keyword_idea_metrics.avg_monthly_searches)
-            competition_values.append(idea.keyword_idea_metrics.competition)
+            competition_values.append(
+                competition_to_text(idea.keyword_idea_metrics.competition)
+            )
             competition_index.append(idea.keyword_idea_metrics.competition_index)
-            average_cpc_micros.append(idea.keyword_idea_metrics.average_cpc_micros)
+            average_cpc_micros.append(
+                micros_to_currency(idea.keyword_idea_metrics.average_cpc_micros)
+            )
             high_top_of_page_bid_micros.append(
-                idea.keyword_idea_metrics.high_top_of_page_bid_micros
+                micros_to_currency(
+                    idea.keyword_idea_metrics.high_top_of_page_bid_micros
+                )
             )
             low_top_of_page_bid_micros.append(
-                idea.keyword_idea_metrics.low_top_of_page_bid_micros
+                micros_to_currency(idea.keyword_idea_metrics.low_top_of_page_bid_micros)
             )
             monthly_search_volumes.append(
                 idea.keyword_idea_metrics.monthly_search_volumes
             )
-
         # Create a DataFrame from the lists
         data = {
             "Keyword": keywords,
+            # Approximate number of monthly searches on this query averaged for the
+            # past 12 months.
             "Avg Monthly Searches": avg_monthly_searches,
+            # The competition level for this search query.
             "Competition": competition_values,
+            # The competition index for the query in the range [0, 100]. This shows
+            # how competitive ad placement is for a keyword. The level of
+            # competition from 0-100 is determined by the number of ad slots filled
+            # divided by the total number of ad slots available. If not enough data
+            # is available, undef will be returned.
             "Competition Index": competition_index,
             "Average Cost per Click": average_cpc_micros,
-            "Top of Page Bid (High Range)": high_top_of_page_bid_micros,
-            "Top of Page Bid (Low Range)": low_top_of_page_bid_micros,
-            # "Monthly Search Volumen": monthly_search_volumes,
+            # Top of page bid high range (80th percentile) in micros for the
+            # keyword.
+            "Top of Page Bid High Range (Currency) ": high_top_of_page_bid_micros,
+            # Top of page bid low range (20th percentile) in micros for the keyword.
+            "Top of Page Bid Low Range (Currency)": low_top_of_page_bid_micros,
+            # Approximate number of searches on this query for the past twelve
+            # months.
+            # "Total Search Volume": monthly_search_volumes,TODO check this
         }
         LOGGER.warning(msg="check the data df")
         df = pd.DataFrame(data)
@@ -361,3 +397,22 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
 # Function to use in the date_start ane date_end validators to check if the input date is greater than four years from the current date
 def datediff_in_years(date1, date2):
     return abs(date1.year - date2.year)
+
+
+def competition_to_text(competition_value):
+    if competition_value == 0:
+        return "Unspecified"
+    elif competition_value == 1:
+        return "Unknown"
+    elif competition_value == 2:
+        return "Low"
+    elif competition_value == 3:
+        return "Medium"
+    elif competition_value == 4:
+        return "High"
+    else:
+        return "Unknown"
+
+
+def micros_to_currency(micros):
+    return micros / 1_000_000
