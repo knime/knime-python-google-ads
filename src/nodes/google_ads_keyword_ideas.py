@@ -47,6 +47,7 @@ import logging
 import knime.extension as knext
 import google_ads_ext
 import pandas as pd
+import numpy as np
 from util.common import (
     GoogleAdObjectSpec,
     GoogleAdConnectionObject,
@@ -75,6 +76,7 @@ from datetime import date, datetime
 from dateutil.relativedelta import relativedelta
 
 import util.utils as utils
+import statistics
 
 LOGGER = logging.getLogger(__name__)
 
@@ -325,8 +327,8 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
         average_cpc_micros = []
         high_top_of_page_bid_micros = []
         low_top_of_page_bid_micros = []
-        monthly_search_volumes = []
-        total_search_volume = 0
+        search_volumes = []
+        seasonality = []
 
         # Extract data and populate lists
         for idea in keyword_ideas:
@@ -348,15 +350,65 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
             low_top_of_page_bid_micros.append(
                 micros_to_currency(idea.keyword_idea_metrics.low_top_of_page_bid_micros)
             )
-            monthly_search_volumes.append(
-                idea.keyword_idea_metrics.monthly_search_volumes
+            # Debugging information
+            LOGGER.warning(f"this is the idea: {idea}")
+            monthly_search_volumes = [
+                metrics.monthly_searches
+                for metrics in idea.keyword_idea_metrics.monthly_search_volumes
+            ]
+            LOGGER.warning(
+                f"this is the monthly search volumes: {monthly_search_volumes}"
             )
+            # Calculate the total search volume of the period
+            search_volumes.append(sum(monthly_search_volumes))
+
+            # Calculate the seasonality of the search volumes
+            if not monthly_search_volumes:
+                adjusted_seasonality = None
+            else:
+                # Calculate trend line using linear regression
+                x = np.arange(len(monthly_search_volumes))
+                y = monthly_search_volumes
+                coefficients = np.polyfit(x, y, 1)
+                trend_line = np.polyval(coefficients, x)
+
+                # Calculate residuals
+                residuals = y - trend_line
+
+                # Calculate standard deviation of residuals
+                std_dev = np.std(residuals)
+
+                # Adjust seasonality
+                avg_search_volume = np.mean(monthly_search_volumes)
+                adjusted_seasonality = std_dev / avg_search_volume
+            seasonality.append(adjusted_seasonality)
+        # Log the length of the arrays
+        LOGGER.warning(f"Length of keywords array: {len(keywords)}")
+        LOGGER.warning(
+            f"Length of avg_monthly_searches array: {len(avg_monthly_searches)}"
+        )
+        LOGGER.warning(f"Length of competition_values array: {len(competition_values)}")
+        LOGGER.warning(f"Length of competition_index array: {len(competition_index)}")
+        LOGGER.warning(f"Length of average_cpc_micros array: {len(average_cpc_micros)}")
+        LOGGER.warning(
+            f"Length of high_top_of_page_bid_micros array: {len(high_top_of_page_bid_micros)}"
+        )
+        LOGGER.warning(
+            f"Length of low_top_of_page_bid_micros array: {len(low_top_of_page_bid_micros)}"
+        )
+        LOGGER.warning(f"Length of search_volumes array: {len(search_volumes)}")
+        LOGGER.warning(f"Length of seasonality array: {len(seasonality)}")
+
         # Create a DataFrame from the lists
         data = {
             "Keyword": keywords,
-            # Approximate number of monthly searches on this query averaged for the
-            # past 12 months.
+            # Approximate number of monthly searches on this query averaged for the selected period (default is 12 months)
             "Avg Monthly Searches": avg_monthly_searches,
+            # Approximate number of searches on this query for the past twelve months.
+            "Total Searches of the Period": search_volumes,
+            # Calculated the trend line, residuals, standard deviation of residuals, and adjusted seasonality for the provided monthly search volumes data.
+            # Reference article: https://blog.startupstash.com/detect-seasonality-within-keyword-planner-data-in-google-sheets-eb9c3dabbe53
+            "Searches Seasonality": seasonality,
             # The competition level for this search query.
             "Competition": competition_values,
             # The competition index for the query in the range [0, 100]. This shows
@@ -371,11 +423,12 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
             "Top of Page Bid High Range (Currency) ": high_top_of_page_bid_micros,
             # Top of page bid low range (20th percentile) in micros for the keyword.
             "Top of Page Bid Low Range (Currency)": low_top_of_page_bid_micros,
-            # Approximate number of searches on this query for the past twelve
-            # months.
-            # "Total Search Volume": monthly_search_volumes,TODO check this
         }
+        # Convert missing values to 0
+        for col in data:
+            data[col] = [0 if pd.isnull(val) else val for val in data[col]]
         LOGGER.warning(msg="check the data df")
+
         df = pd.DataFrame(data)
         LOGGER.warning(type(df))
         # Display the DataFrame
