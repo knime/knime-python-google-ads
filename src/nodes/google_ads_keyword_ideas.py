@@ -76,9 +76,65 @@ from datetime import date, datetime
 from dateutil.relativedelta import relativedelta
 
 import util.utils as utils
-import statistics
+from util.data_utils import (
+    read_csv,
+    get_criterion_id,
+)
+from enum import Enum
 
 LOGGER = logging.getLogger(__name__)
+
+
+LOGGER.warning(f"print dictionaries: {read_csv()}")
+
+
+# Select language parameter group provided by the CSV in the data folder
+@knext.parameter_group(
+    label="Select from the available languages for targetting",
+)
+class LanguageSettings:
+    class LanguageSelection(knext.EnumParameterOptions):
+        """
+        Subclass of knext.EnumParameterOptions to handle language options created from a CSV file.
+        """
+
+        @classmethod
+        def from_csv(cls):
+            """
+            Create Enum options from a hardcoded CSV file.
+            """
+            language_code_to_name, language_name_to_criterion_id, all_languages = (
+                read_csv()
+            )
+            cls.language_code_to_name = language_code_to_name
+            cls.language_name_to_criterion_id = language_name_to_criterion_id
+            cls.all_languages = all_languages
+
+            options = {}
+            # Set default language to English
+            default_language = "ENGLISH"
+            for language_code, language_name in language_code_to_name.items():
+                option_name = language_name.upper().replace(" ", "_")
+                option_label = language_name
+                option_description = (
+                    f"The {language_name.lower()} language ({language_code})"
+                )
+                options[option_name] = (option_label, option_description)
+
+            return Enum(cls.__name__, options, type=cls), default_language
+
+            return get_all_languages()
+
+    # Get Enum object and default language
+    enum_object, default_language = LanguageSelection.from_csv()
+
+    # Define the EnumParameter instance with the default language
+    language_selection = knext.EnumParameter(
+        label="Language",
+        description="Select the language to target.",
+        default_value=default_language,
+        enum=enum_object,
+    )
 
 
 @knext.node(
@@ -86,6 +142,7 @@ LOGGER = logging.getLogger(__name__)
     node_type=knext.NodeType.MANIPULATOR,
     icon_path="icons/google_ads_keyword_ideas_logo.png",
     category=google_ads_ext.main_category,
+    keywords=["Google Ads", "Keyword Ideas", "Google Ads API", "Keyword Planner"],
 )
 @knext.input_port(
     "Google Client",
@@ -97,6 +154,10 @@ LOGGER = logging.getLogger(__name__)
     description="KNIME table that contains a list of keywords to generate ideas from",
 )
 @knext.output_table(name="Output Data", description="KNIME table with keyword ideas")
+@knext.output_table(
+    name="Keywords Ideas Monthly Search Volumes",
+    description="KNIME table with keyword ideas and the monthly search volumes to check trends and seasonality",
+)
 class GoogleAdsKwdIdeas(knext.PythonNode):
 
     selected_column = knext.ColumnParameter(
@@ -107,7 +168,6 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
         include_none_column=True,
         since_version=None,
     )
-
     location_id = knext.StringParameter(
         label="Location ID",
         description="Input your location ID",
@@ -115,12 +175,9 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
         is_advanced=False,
     )
 
-    language_id = knext.StringParameter(
-        label="Language Id",
-        description="Input the Language ID",
-        default_value="1000",
-        is_advanced=False,
-    )
+    language_selection = LanguageSettings()
+
+    language_id = get_criterion_id(language_selection)
     # Default value for the start date is thirteen months ago from the current date, because by default the historical metrics are set up for the last twelve (not including the current one) months.
 
     thirteen_months_ago = date.today() - relativedelta(months=13)
@@ -220,7 +277,11 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
         input_table: knext.Table,
     ) -> knext.Table:
         # TODO make optional the page url provider to generate ideas also from there! NOSONAR
-
+        LOGGER.warning(f"this is the language selection: {self.language_selection}")
+        LOGGER.warning(
+            f"this is the language selection type: {type(self.language_selection)}"
+        )
+        LOGGER.warning(f"this is the language id: {self.language_id}")
         location_ids = [self.location_id]
         selected_column = self.selected_column
         if self.selected_column is not None:
@@ -400,6 +461,7 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
         LOGGER.warning(f"Length of seasonality array: {len(seasonality)}")
 
         # Create a DataFrame from the lists
+        # TODO remove average cost per click when parameter is false
         data = {
             "Keyword": keywords,
             # Approximate number of monthly searches on this query averaged for the selected period (default is 12 months)
