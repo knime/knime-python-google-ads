@@ -8,6 +8,6 @@ version: 1.0.0
 vendor: KNIME AG, Zurich, Switzerland
 license_file: LICENSE.txt
 feature_dependencies:
-  - org.knime.features.google.api 5.3.0
+  #- org.knime.features.google.api 5.3.0 remove for now until supported by the build system (AP-22634)
   - org.knime.features.core 5.3.0 #ensure that this extension can only be used with 5.3.0 which includes expires_after
 
