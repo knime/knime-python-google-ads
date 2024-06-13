@@ -82,25 +82,13 @@ from util.data_utils import (
     convert_to_list,
     LanguageSelection,
 )
+from itertools import islice
+
 
 LOGGER = logging.getLogger(__name__)
 
 
 LOGGER.warning(f"print dictionaries: {read_csv()}")
-
-
-# Select language parameter group provided by the CSV in the data folder
-@knext.parameter_group(
-    label="Select from the available languages for targetting",
-)
-class LanguageSettings:
-    language_selection = knext.EnumParameter(
-        label="Language",
-        description="Select the language to target.",
-        default_value=LanguageSelection.ENGLISH.name,
-        enum=LanguageSelection,
-        style=knext.EnumParameter.Style.DROPDOWN,
-    )
 
 
 @knext.node(
@@ -119,31 +107,43 @@ class LanguageSettings:
     name="Keywords",
     description="KNIME table that contains a list of keywords to generate ideas from",
 )
-@knext.output_table(name="Output Data", description="KNIME table with keyword ideas")
+@knext.input_table(
+    name="Location IDs",
+    description="KNIME table that contains a list of location IDs to target",
+)
 # TODO: Add a new output table with the search volumes to check trends and seasonality
-# @knext.output_table(
-#    name="Keywords Ideas Monthly Search Volumes",
-#    description="KNIME table with keyword ideas and the monthly search volumes to check trends and seasonality",
-# )
+@knext.output_table(
+    name="Keywords Ideas Monthly Search Volumes",
+    description="KNIME table with keyword ideas and the monthly search volumes to check trends and seasonality",
+)
 class GoogleAdsKwdIdeas(knext.PythonNode):
 
-    selected_column = knext.ColumnParameter(
+    keywords_column = knext.ColumnParameter(
         "Keywords Column",
         "KNIME table column containing the kewyords from which fetch the ideas with the search volume",
         port_index=1,
         include_row_key=False,
-        include_none_column=True,
+        include_none_column=False,
         since_version=None,
     )
-    # TODO: Add a validator to avoid more than 10 location IDs
-    location_id = knext.StringParameter(
-        label="Location ID",
-        description="Input your location ID",
-        default_value="1023191",
-        is_advanced=False,
+
+    locations_column = knext.ColumnParameter(
+        "Locations Column",
+        "KNIME table column containing the location IDs to target",
+        port_index=2,
+        include_row_key=False,
+        include_none_column=False,
+        since_version=None,
     )
     # Select language parameter group hardcoded from the CSV in the data folder and built as class (EnumParameterOptions) in the data_utils.py file.
-    language_settings = LanguageSettings()
+
+    language_selection = knext.EnumParameter(
+        label="Language",
+        description="Select the language to target.",
+        default_value=LanguageSelection.ENGLISH.name,
+        enum=LanguageSelection,
+        style=knext.EnumParameter.Style.DROPDOWN,
+    )
 
     # Default value for the start date is thirteen months ago from the current date, because by default the historical metrics are set up for the last twelve (not including the current one) months.
 
@@ -228,6 +228,7 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
         configure_context: knext.ConfigurationContext,
         spec: GoogleAdObjectSpec,
         input_table_schema: knext.Schema,
+        location_table_schema: knext.Schema,
     ):
         # TODO Check and throw config error maybe if spec.customer_id is not a string or does not have a specific format NOSONAR
         # We will add one column of type double to the table
@@ -237,31 +238,36 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
                 "The end date cannot be set up for a date earlier than the start date. Please set an end date later than the start date."
             )
 
+        if self.keywords_column is None:
+            raise knext.InvalidParametersError("No input column with Keywords selected")
+
     def execute(
         self,
         exec_context: knext.ExecutionContext,
         port_object: GoogleAdConnectionObject,
         input_table: knext.Table,
+        location_table: knext.Table,
     ) -> knext.Table:
-        language_id = get_criterion_id(self.language_settings.language_selection)
+
+        # Get the language id from the language selection enumparameter
+        language_id = get_criterion_id(self.language_selection)
 
         # TODO make optional the page url provider to generate ideas also from there! NOSONAR
 
-        LOGGER.warning(f"this is the language id: {language_id}")
-        location_ids = convert_to_list(self.location_id)
-        selected_column = self.selected_column
-        if self.selected_column is not None:
+        # Get the location IDs from the location table
+        location_ids_column = location_table.to_pandas()
+        location_ids_list = location_ids_column[self.locations_column].tolist()
+
+        # Get the keywords from the input table
+        keywords_column = self.keywords_column
+        if self.keywords_column is not None:
             keyword_texts_df = input_table.to_pandas()
         else:
             exec_context.set_warning("No column selected")
 
-        keyword_texts = keyword_texts_df[selected_column].tolist()
-
-        LOGGER.warning(msg="check the keyword_texts object")
-        LOGGER.warning(type(keyword_texts))
+        keyword_texts = keyword_texts_df[keywords_column].tolist()
 
         # Creating the Google Ads Client object
-        LOGGER.warning(f"the googleadsclient object:{type(GoogleAdsClient)}")
         client: GoogleAdsClient
         client = port_object.client
         account_id = port_object.spec.account_id
@@ -284,8 +290,9 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
         )
 
         # List the location IDs
-        location_rns = self.map_locations_ids_to_resource_names(client, location_ids)
-        LOGGER.warning(f"location_rns= {location_rns}")
+        location_rns = self.map_locations_ids_to_resource_names(
+            client, location_ids_list
+        )
 
         # Returns a fully-qualified language_constant string.
         language_rn_get_service: GoogleAdsServiceClient
@@ -293,58 +300,101 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
         language_rn = language_rn_get_service.language_constant_path(language_id)
         LOGGER.warning(f"Language id: {language_rn}")
 
-        # [Preparing the request]
-        # Only one of the fields "url_seed", "keyword_seed", or
-        # "keyword_and_url_seed" can be set on the request, depending on whether
-        # keywords, a page_url or both were passed to this function.
-        request: GenerateKeywordIdeasRequest
-        request = client.get_type("GenerateKeywordIdeasRequest")
-        request.customer_id = account_id
-        request.language = language_rn
-        request.geo_target_constants.extend(location_rns)
-        request.include_adult_keywords = False
-        request.keyword_plan_network = keyword_plan_network
-        request.include_adult_keywords = self.include_adult_keywords
+        # Display the DataFrame
 
-        # Properly create and set the year_month_range within historical_metrics_options
-        historical_metrics_options = client.get_type("HistoricalMetricsOptions")
-        year_month_range = historical_metrics_options.year_month_range
-
-        year_month_range.start.year = self.date_start.year
-        # The month is 1-based, so we need to add 1 to the month to get the correct value.
-        year_month_range.start.month = self.date_start.month + 1
-        year_month_range.end.year = self.date_end.year
-        year_month_range.end.month = self.date_end.month + 1
-
-        LOGGER.warning(f"this the date range type:{type(historical_metrics_options)}")
-        LOGGER.warning(f"this is the range itself: {historical_metrics_options}")
-
-        request.historical_metrics_options.CopyFrom(historical_metrics_options)
-        request.historical_metrics_options.include_average_cpc = (
-            self.include_average_cpc
+        df_table = self.generate_keywords_ideas_with_chunks(
+            location_rns,
+            account_id,
+            client,
+            keyword_plan_idea_service,
+            keyword_texts,
+            language_rn,
+            keyword_plan_network,
+            self.include_adult_keywords,
+            self.date_start,
+            self.date_end,
+            self.include_average_cpc,
         )
+        return knext.Table.from_pandas(df_table)
 
-        # TODO admit a website URL as input NOSONAR
-        # To generate keyword ideas with only a page_url and no keywords we need
-        # to initialize a UrlSeed object with the page_url as the "url" field.
-        #     request.url_seed.url = page_url
+        # [END generate_keyword_ideas]
 
-        # To generate keyword ideas with only a list of keywords and no page_url
-        # we need to initialize a KeywordSeed object and set the "keywords" field
-        # to be a list of StringValue objects.
-        request.keyword_seed.keywords.extend(keyword_texts)
+    def map_locations_ids_to_resource_names(
+        self, port_object: GoogleAdsClient, location_ids
+    ):
+        client = port_object
 
-        # To generate keyword ideas using both a list of keywords and a page_url we
-        # need to initialize a KeywordAndUrlSeed object, setting both the "url" and
-        # "keywords" fields.
-        #     request.keyword_and_url_seed.url = page_url
-        #     request.keyword_and_url_seed.keywords.extend(keyword_texts)
+        build_resource_name_client: GeoTargetConstantServiceClient
+        build_resource_name_client = client.get_service("GeoTargetConstantService")
+        build_resource_name = build_resource_name_client.geo_target_constant_path
+        return [build_resource_name(location_id) for location_id in location_ids]
 
-        keyword_ideas = keyword_plan_idea_service.generate_keyword_ideas(
-            request=request
-        )
-        LOGGER.warning("let'see what it is")
-        LOGGER.warning(type(keyword_ideas))
+    # Function to chunk the location IDs into groups of 10
+    # TODO:append an identifer to the chunked groups to be able to identify them in the output table
+    # TODO: add a parameter to set the chunk size?
+    def chunked(self, iterable, size):
+        it = iter(iterable)
+        return iter(lambda: tuple(islice(it, size)), ())
+
+    def generate_keywords_ideas_with_chunks(
+        self,
+        location_rns,
+        account_id,
+        client,
+        keyword_plan_idea_service,
+        keyword_texts,
+        language_rn,
+        keyword_plan_network,
+        include_adult_keywords,
+        date_start,
+        date_end,
+        include_average_cpc,
+    ):
+        location_chunks = self.chunked(location_rns, 10)
+        all_keyword_ideas = []
+
+        for chunk in location_chunks:
+
+            # [Preparing the request]
+            # Only one of the fields "url_seed", "keyword_seed", or
+            # "keyword_and_url_seed" can be set on the request, depending on whether
+            # keywords, a page_url or both were passed to this function.
+            request: GenerateKeywordIdeasRequest
+            request = client.get_type("GenerateKeywordIdeasRequest")
+            request.customer_id = account_id
+            request.language = language_rn
+            request.geo_target_constants.extend(chunk)
+            request.keyword_plan_network = keyword_plan_network
+            request.include_adult_keywords = include_adult_keywords
+
+            # Properly create and set the year_month_range within historical_metrics_options
+            historical_metrics_options = client.get_type("HistoricalMetricsOptions")
+            year_month_range = historical_metrics_options.year_month_range
+
+            year_month_range.start.year = date_start.year
+            # The month is 1-based, so we need to add 1 to the month to get the correct value.
+            year_month_range.start.month = date_start.month + 1
+            year_month_range.end.year = date_end.year
+            year_month_range.end.month = date_end.month + 1
+
+            request.historical_metrics_options.CopyFrom(historical_metrics_options)
+            request.historical_metrics_options.include_average_cpc = include_average_cpc
+
+            # TODO admit a website URL as input NOSONAR
+            # To generate keyword ideas with only a page_url and no keywords we need
+            # to initialize a UrlSeed object with the page_url as the "url" field.
+            #     request.url_seed.url = page_url
+
+            # To generate keyword ideas with only a list of keywords and no page_url
+            # we need to initialize a KeywordSeed object and set the "keywords" field
+            # to be a list of StringValue objects.
+            request.keyword_seed.keywords.extend(keyword_texts)
+
+            # Make the request and collect the results
+            keyword_ideas = keyword_plan_idea_service.generate_keyword_ideas(
+                request=request
+            )
+            all_keyword_ideas.extend(keyword_ideas)
 
         # Create empty lists to store data
         keywords = []
@@ -358,7 +408,7 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
         seasonality = []
 
         # Extract data and populate lists
-        for idea in keyword_ideas:
+        for idea in all_keyword_ideas:
 
             keywords.append(idea.text)
             avg_monthly_searches.append(idea.keyword_idea_metrics.avg_monthly_searches)
@@ -377,15 +427,10 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
             low_top_of_page_bid_micros.append(
                 micros_to_currency(idea.keyword_idea_metrics.low_top_of_page_bid_micros)
             )
-            # Debugging information
-            LOGGER.warning(f"this is the idea: {idea}")
             monthly_search_volumes = [
                 metrics.monthly_searches
                 for metrics in idea.keyword_idea_metrics.monthly_search_volumes
             ]
-            LOGGER.warning(
-                f"this is the monthly search volumes: {monthly_search_volumes}"
-            )
             # Calculate the total search volume of the period
             search_volumes.append(sum(monthly_search_volumes))
 
@@ -409,22 +454,6 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
                 avg_search_volume = np.mean(monthly_search_volumes)
                 adjusted_seasonality = std_dev / avg_search_volume
             seasonality.append(adjusted_seasonality)
-        # Log the length of the arrays
-        LOGGER.warning(f"Length of keywords array: {len(keywords)}")
-        LOGGER.warning(
-            f"Length of avg_monthly_searches array: {len(avg_monthly_searches)}"
-        )
-        LOGGER.warning(f"Length of competition_values array: {len(competition_values)}")
-        LOGGER.warning(f"Length of competition_index array: {len(competition_index)}")
-        LOGGER.warning(f"Length of average_cpc_micros array: {len(average_cpc_micros)}")
-        LOGGER.warning(
-            f"Length of high_top_of_page_bid_micros array: {len(high_top_of_page_bid_micros)}"
-        )
-        LOGGER.warning(
-            f"Length of low_top_of_page_bid_micros array: {len(low_top_of_page_bid_micros)}"
-        )
-        LOGGER.warning(f"Length of search_volumes array: {len(search_volumes)}")
-        LOGGER.warning(f"Length of seasonality array: {len(seasonality)}")
 
         # Create a DataFrame from the lists
         # TODO remove average cost per click when parameter is false
@@ -455,24 +484,8 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
         # Convert missing values to 0
         for col in data:
             data[col] = [0 if pd.isnull(val) else val for val in data[col]]
-        LOGGER.warning(msg="check the data df")
-
         df = pd.DataFrame(data)
-        LOGGER.warning(type(df))
-        # Display the DataFrame
-        return knext.Table.from_pandas(df)
-
-        # [END generate_keyword_ideas]
-
-    def map_locations_ids_to_resource_names(
-        self, port_object: GoogleAdsClient, location_ids
-    ):
-        client = port_object
-
-        build_resource_name_client: GeoTargetConstantServiceClient
-        build_resource_name_client = client.get_service("GeoTargetConstantService")
-        build_resource_name = build_resource_name_client.geo_target_constant_path
-        return [build_resource_name(location_id) for location_id in location_ids]
+        return df
 
 
 # Function to use in the date_start ane date_end validators to check if the input date is greater than four years from the current date
