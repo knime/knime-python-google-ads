@@ -180,7 +180,8 @@ class GoogleAdsQuery:
     ):
 
         # counter to build the progress bar during execution
-        i = 0
+        # i = 0
+        # Build the client Object
         client: GoogleAdsClient
         client = port_object.client
         account_id = port_object.spec.account_id
@@ -190,9 +191,7 @@ class GoogleAdsQuery:
         ####################
         # TODO Implement config window with a query builder
         execution_query = self.define_query()
-        LOGGER.warning(f"this is the query:{execution_query}")
 
-        # TODO move the pre-built queries to a separte file in the util folder pre-built_ad_queries.py
         DEFAULT_QUERY = """
         SELECT
             campaign.id,
@@ -220,59 +219,77 @@ class GoogleAdsQuery:
             response_stream = ga_service.search_stream(
                 search_request, timeout=self.custom_timeout
             )
+            # Initialize the necessary variables
             data = []
             header_array = []
+            all_batches = []
 
+            # First pass: Collect all batches and count them
             for batch in response_stream:
+                all_batches.append(batch)
 
-                header_array = [field for field in batch.field_mask.paths]
-                number_of_results = len([result for result in batch.results])
+            number_of_batches = len(all_batches)
 
-                for row in batch.results:
-                    data_row = []
-                    row: GoogleAdsRow
-                    for field in batch.field_mask.paths:
+            if number_of_batches == 0:
+                exec_context.set_warning("No data was returned from the query.")
+            else:
+                # Initialize the iteration counter to use during the set up of the progress bar
+                i = 0
 
-                        # Split the attribute_name string into parts
-                        attribute_parts = field.split(".")
+                # Process each batch
+                for i, batch in enumerate(all_batches, start=0):
 
-                        # Initialize the object to start the traversal
-                        attribute_value = row
+                    header_array = [field for field in batch.field_mask.paths]
 
-                        # Traverse the attribute parts and access the attributes
-                        for part in attribute_parts:
+                    for row in batch.results:
+                        # Cancel the execution if the user cancels the node execution
+                        utils.check_canceled(exec_context)
+                        data_row = []
+                        row: GoogleAdsRow
+                        for field in batch.field_mask.paths:
 
-                            # query-fix for ADGROUP and AD queries: we are iterating over the attribute_value (type = class) line
-                            # and using the field name splitted to access the values with the getattr(method),
-                            # when trying to use 'type' there is not any attr called like this
-                            # in the class attribute_value, so adding and underscore fix this.
-                            # temp fix: we don't know how to check before the attr name of the class attribute value
-                            if part == "type":
-                                part = part + "_"
+                            # Split the attribute_name string into parts
+                            attribute_parts = field.split(".")
 
-                            attribute_value = getattr(attribute_value, part)
+                            # Initialize the object to start the traversal
+                            attribute_value = row
 
-                            # query-fix for AD query. Explanation for the below if: when fetching the field "final_urls" from the response_stream, it returned a [] type that was not in any Python readable type.
-                            # indeed the type was this protobuf RepeatedScalarFieldContainer. The goal of the if clause is to convert the empty list to empty strings and extract the RepeatedScalarFieldContainer( similar to list type) element
-                            # for reference https://googleapis.dev/python/protobuf/latest/google/protobuf/internal/containers.html
-                            if (
-                                type(attribute_value)
-                                is _message.RepeatedScalarContainer
-                            ):
-                                attribute_value: RepeatedScalarFieldContainer
-                                if len(attribute_value) == 0:
-                                    attribute_value = ""
-                                else:
-                                    attribute_value = attribute_value.pop(0)
-                        data_row.append(attribute_value)
-                    data.append(data_row)
-                    i += 1
-                    utils.check_canceled(exec_context)
+                            # Traverse the attribute parts and access the attributes
+                            for part in attribute_parts:
+
+                                # query-fix for ADGROUP and AD queries: we are iterating over the attribute_value (type = class) line
+                                # and using the field name splitted to access the values with the getattr(method),
+                                # when trying to use 'type' there is not any attr called like this
+                                # in the class attribute_value, so adding and underscore fix this.
+                                # temp fix: we don't know how to check before the attr name of the class attribute value
+                                if part == "type":
+                                    part = part + "_"
+
+                                attribute_value = getattr(attribute_value, part)
+
+                                # query-fix for AD query. Explanation for the below if: when fetching the field "final_urls" from the response_stream, it returned a [] type that was not in any Python readable type.
+                                # indeed the type was this protobuf RepeatedScalarFieldContainer. The goal of the if clause is to convert the empty list to empty strings and extract the RepeatedScalarFieldContainer( similar to list type) element
+                                # for reference https://googleapis.dev/python/protobuf/latest/google/protobuf/internal/containers.html
+                                if (
+                                    type(attribute_value)
+                                    is _message.RepeatedScalarContainer
+                                ):
+                                    attribute_value: RepeatedScalarFieldContainer
+                                    if len(attribute_value) == 0:
+                                        attribute_value = ""
+                                    else:
+                                        attribute_value = attribute_value.pop(0)
+                            data_row.append(attribute_value)
+                        data.append(data_row)
+
+                    # Set up the progress bar taking the toal number of batches and the batch iteration counter (1 batch = 10.000 rows)
                     exec_context.set_progress(
-                        i / number_of_results,
-                        "We are preparing your data \U0001F468\u200D\U0001F373",
+                        i / number_of_batches,
+                        str(i * 10000)
+                        + " rows processed. We are preparing your data \U0001F468\u200D\U0001F373",
                     )
-            df = pd.DataFrame(data, columns=header_array)
+                # Create a pandas dataframe with the data and the header
+                df = pd.DataFrame(data, columns=header_array)
 
         except GoogleAdsException as ex:
             status_error = ex.error.code().name

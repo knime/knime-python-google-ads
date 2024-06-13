@@ -159,7 +159,6 @@ class GoogleAdsGeoTargets:
                 exec_context.set_warning(
                     "No data was returned from the query. The target type is not supported for the selected country. Please try another combination."
                 )
-                LOGGER.warning(f"Number of batches: {number_of_batches}")
             else:
                 # Initialize the iteration counter
                 i = 0
@@ -209,12 +208,12 @@ class GoogleAdsGeoTargets:
                             data_row.append(attribute_value)
                         data.append(data_row)
 
-                # Set up the progress bar
-                exec_context.set_progress(
-                    i / number_of_batches,
-                    str(i * 10000)
-                    + " rows processed. We are preparing your data \U0001F468\u200D\U0001F373",
-                )
+                    # Set up the progress bar
+                    exec_context.set_progress(
+                        i / number_of_batches,
+                        str(i * 10000)
+                        + " rows processed. We are preparing your data \U0001F468\u200D\U0001F373",
+                    )
                 # Create a DataFrame from the collected data
                 df = pd.DataFrame(data, columns=header_array)
 
