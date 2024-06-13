@@ -86,23 +86,18 @@ LOGGER = logging.getLogger(__name__)
 @knext.output_table(name="Output Data", description="KNIME table with query results")
 class GoogleAdsGeoTargets:
 
-    country_selection = knext.StringParameter(
+    country_selection = knext.EnumParameter(
         label="Country Selection",
         description="Select the countries you want to target",
-        default_value="US",
+        default_value=geo_queries.CountryOptions.US.name,
+        enum=geo_queries.CountryOptions,
     )
 
-    target_type = knext.StringParameter(
+    target_type = knext.EnumParameter(
         label="Target Type",
         description="Select the target type",
-        default_value="City",
-    )
-
-    include_childs = knext.BoolParameter(
-        label="Include Childs",
-        description="Include child locations",
-        default_value=False,
-        is_advanced=True,
+        default_value=geo_queries.TargetTypeOptions.CITY.name,
+        enum=geo_queries.TargetTypeOptions,
     )
 
     custom_timeout = knext.IntParameter(
@@ -125,14 +120,11 @@ class GoogleAdsGeoTargets:
         exec_context: knext.ExecutionContext,
         port_object: GoogleAdConnectionObject,
     ):
-        # Counter for the progress bar used in the execute method
-        i = 0
         # Build the client object
         client: GoogleAdsClient
         client = port_object.client
         account_id = port_object.spec.account_id
 
-        # Get the query for the country and target type
         primary_query = geo_queries.get_country_type_query(
             self.country_selection, self.target_type
         )
@@ -152,59 +144,79 @@ class GoogleAdsGeoTargets:
             response_stream = ga_service.search_stream(
                 search_request, timeout=self.custom_timeout
             )
+
+            # Initialize the necessary variables
             data = []
             header_array = []
+            all_batches = []
 
+            # First pass: Collect all batches and count them
             for batch in response_stream:
+                all_batches.append(batch)
 
-                header_array = [field for field in batch.field_mask.paths]
-                number_of_results = len([result for result in batch.results])
+            number_of_batches = len(all_batches)
+            if number_of_batches == 0:
+                exec_context.set_warning(
+                    "No data was returned from the query. The target type is not supported for the selected country. Please try another combination."
+                )
+                LOGGER.warning(f"Number of batches: {number_of_batches}")
+            else:
+                # Initialize the iteration counter
+                i = 0
 
-                for row in batch.results:
-                    data_row = []
-                    row: GoogleAdsRow
-                    for field in batch.field_mask.paths:
+                # Process each batch
+                for i, batch in enumerate(all_batches, start=0):
 
-                        # Split the attribute_name string into parts
-                        attribute_parts = field.split(".")
+                    header_array = [field for field in batch.field_mask.paths]
 
-                        # Initialize the object to start the traversal
-                        attribute_value = row
+                    for row in batch.results:
+                        # cancel the execution if the user cancels the execution
+                        utils.check_canceled(exec_context)
+                        data_row = []
+                        row: GoogleAdsRow
+                        for field in batch.field_mask.paths:
+                            # Split the attribute_name string into parts
+                            attribute_parts = field.split(".")
 
-                        # Traverse the attribute parts and access the attributes
-                        for part in attribute_parts:
+                            # Initialize the object to start the traversal
+                            attribute_value = row
 
-                            # query-fix for ADGROUP and AD queries: we are iterating over the attribute_value (type = class) line
-                            # and using the field name splitted to access the values with the getattr(method),
-                            # when trying to use 'type' there is not any attr called like this
-                            # in the class attribute_value, so adding and underscore fix this.
-                            # temp fix: we don't know how to check before the attr name of the class attribute value
-                            if part == "type":
-                                part = part + "_"
+                            # Traverse the attribute parts and access the attributes
+                            for part in attribute_parts:
 
-                            attribute_value = getattr(attribute_value, part)
+                                # query-fix for ADGROUP and AD queries: we are iterating over the attribute_value (type = class) line
+                                # and using the field name splitted to access the values with the getattr(method),
+                                # when trying to use 'type' there is not any attr called like this
+                                # in the class attribute_value, so adding and underscore fix this.
+                                # temp fix: we don't know how to check before the attr name of the class attribute value
+                                if part == "type":
+                                    part = part + "_"
 
-                            # query-fix for AD query. Explanation for the below if: when fetching the field "final_urls" from the response_stream, it returned a [] type that was not in any Python readable type.
-                            # indeed the type was this protobuf RepeatedScalarFieldContainer. The goal of the if clause is to convert the empty list to empty strings and extract the RepeatedScalarFieldContainer( similar to list type) element
-                            # for reference https://googleapis.dev/python/protobuf/latest/google/protobuf/internal/containers.html
-                            if (
-                                type(attribute_value)
-                                is _message.RepeatedScalarContainer
-                            ):
-                                attribute_value: RepeatedScalarFieldContainer
-                                if len(attribute_value) == 0:
-                                    attribute_value = ""
-                                else:
-                                    attribute_value = attribute_value.pop(0)
-                        data_row.append(attribute_value)
-                    data.append(data_row)
-                    i += 0.5
-                    utils.check_canceled(exec_context)
-                    exec_context.set_progress(
-                        i / number_of_results,
-                        "We are preparing your data \U0001F468\u200D\U0001F373",
-                    )
-            df = pd.DataFrame(data, columns=header_array)
+                                attribute_value = getattr(attribute_value, part)
+
+                                # query-fix for AD query. Explanation for the below if: when fetching the field "final_urls" from the response_stream, it returned a [] type that was not in any Python readable type.
+                                # indeed the type was this protobuf RepeatedScalarFieldContainer. The goal of the if clause is to convert the empty list to empty strings and extract the RepeatedScalarFieldContainer( similar to list type) element
+                                # for reference https://googleapis.dev/python/protobuf/latest/google/protobuf/internal/containers.html
+                                if (
+                                    type(attribute_value)
+                                    is _message.RepeatedScalarContainer
+                                ):
+                                    attribute_value: RepeatedScalarFieldContainer
+                                    if len(attribute_value) == 0:
+                                        attribute_value = ""
+                                    else:
+                                        attribute_value = attribute_value.pop(0)
+                            data_row.append(attribute_value)
+                        data.append(data_row)
+
+                # Set up the progress bar
+                exec_context.set_progress(
+                    i / number_of_batches,
+                    str(i * 10000)
+                    + " rows processed. We are preparing your data \U0001F468\u200D\U0001F373",
+                )
+                # Create a DataFrame from the collected data
+                df = pd.DataFrame(data, columns=header_array)
 
         except GoogleAdsException as ex:
             status_error = ex.error.code().name
