@@ -48,6 +48,10 @@ import knime.extension as knext
 import google_ads_ext
 import pandas as pd
 import numpy as np
+from itertools import islice
+import time
+import random
+from collections import deque
 from util.common import (
     GoogleAdObjectSpec,
     GoogleAdConnectionObject,
@@ -72,9 +76,9 @@ from google.ads.googleads.v16.enums.types.keyword_plan_competition_level import 
 from google.ads.googleads.v16.enums.types.keyword_plan_network import (
     KeywordPlanNetworkEnum,
 )
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from dateutil.relativedelta import relativedelta
-
+from google.ads.googleads.errors import GoogleAdsException
 import util.utils as utils
 from util.data_utils import (
     read_csv,
@@ -82,7 +86,7 @@ from util.data_utils import (
     convert_to_list,
     LanguageSelection,
 )
-from itertools import islice
+from google.ads.googleads.v16.errors.types.quota_error import QuotaErrorEnum
 
 
 LOGGER = logging.getLogger(__name__)
@@ -300,7 +304,7 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
         language_rn = language_rn_get_service.language_constant_path(language_id)
         LOGGER.warning(f"Language id: {language_rn}")
 
-        # Display the DataFrame
+        # Do the Keyword Ideas generation and return the table
 
         df_table = self.generate_keywords_ideas_with_chunks(
             location_rns,
@@ -332,10 +336,75 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
     # Function to chunk the location IDs into groups of 10
     # TODO:append an identifer to the chunked groups to be able to identify them in the output table
     # TODO: add a parameter to set the chunk size?
+
+    # Initialize a deque to keep track of request timestamps
+    request_timestamps = deque(maxlen=60)
+
+    # Define a function to retry the request with exponential backoff if a RESOURCE_EXHAUSTED error occurs.
+    # Max requests per min are 60: 1 request per second
+    # Quota reference website: https://developers.google.com/google-ads/api/docs/best-practices/quotas#planning_services
+
+    def exponential_backoff_retry(self, func, max_attempts=5, initial_delay=5):
+        delay = initial_delay
+        LOGGER.warning(f"Initial delay: {delay}")
+
+        for attempt in range(max_attempts):
+            LOGGER.warning(f"Attempt {attempt+1} of {max_attempts}")
+            try:
+                # Rate limiting check
+                if self.request_timestamps:
+                    time_since_last_request = time.time() - self.request_timestamps[-1]
+                    formatted_time = format_timestamp(time_since_last_request)
+                    LOGGER.warning(f"Time since last request: {formatted_time}")
+                    if time_since_last_request < 1:
+                        sleep_time = 1 - time_since_last_request
+                        formatted_sleep_time = format_timestamp(sleep_time)
+                        LOGGER.warning(
+                            f"Sleeping for {formatted_sleep_time} seconds due to rate limiting"
+                        )
+                        time.sleep(sleep_time)
+
+                # Make the request and record the timestamp
+                result = func()
+                self.request_timestamps.append(time.time())
+                formatted_request_timestamps = [
+                    format_timestamp(ts) for ts in self.request_timestamps
+                ]
+                LOGGER.warning(f"Request timestamps: {formatted_request_timestamps}")
+                LOGGER.warning(
+                    f"Length of request timestamps: {len(self.request_timestamps)}"
+                )
+                return result
+
+            except GoogleAdsException as ex:
+                error_code = ex.failure.errors[0].error_code
+                LOGGER.warning(f"Error code: {error_code.quota_error}")
+                if (
+                    error_code.quota_error == QuotaErrorEnum.RESOURCE_EXHAUSTED
+                    or ex.error.code() == 8  # StatusCode.RESOURCE_EXHAUSTED
+                ):
+                    if attempt < max_attempts - 1:
+                        LOGGER.warning(
+                            f"Attempt {attempt+1} failed due to RESOURCE_EXHAUSTED. Retrying in {delay} seconds..."
+                        )
+                        time.sleep(delay)
+                        delay *= 2  # Exponential backoff
+                        delay += random.uniform(
+                            0, delay
+                        )  # Add jitter to avoid thundering herd problem
+                    else:
+                        LOGGER.warning("Max attempts reached, raising the exception.")
+                        raise
+                else:
+                    LOGGER.warning(f"Non-retryable error encountered: {ex}")
+                    raise
+
+    # Define a function to chunk the location
     def chunked(self, iterable, size):
         it = iter(iterable)
         return iter(lambda: tuple(islice(it, size)), ())
 
+    # Function to generate keyword ideas with chunks
     def generate_keywords_ideas_with_chunks(
         self,
         location_rns,
@@ -351,50 +420,72 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
         include_average_cpc,
     ):
         location_chunks = self.chunked(location_rns, 10)
+        LOGGER.warning(f"Location chunks: {location_chunks}")
         all_keyword_ideas = []
+        iteration_ids = []
 
-        for chunk in location_chunks:
+        # Clear the request timestamps for a new batch of requests
+        self.request_timestamps.clear()
+        LOGGER.warning(f"Request timestamps cleared: {self.request_timestamps}")
 
-            # [Preparing the request]
-            # Only one of the fields "url_seed", "keyword_seed", or
-            # "keyword_and_url_seed" can be set on the request, depending on whether
-            # keywords, a page_url or both were passed to this function.
-            request: GenerateKeywordIdeasRequest
-            request = client.get_type("GenerateKeywordIdeasRequest")
-            request.customer_id = account_id
-            request.language = language_rn
-            request.geo_target_constants.extend(chunk)
-            request.keyword_plan_network = keyword_plan_network
-            request.include_adult_keywords = include_adult_keywords
+        for iteration_id, chunk in enumerate(location_chunks, start=1):
 
-            # Properly create and set the year_month_range within historical_metrics_options
-            historical_metrics_options = client.get_type("HistoricalMetricsOptions")
-            year_month_range = historical_metrics_options.year_month_range
+            def request_keyword_ideas(chunk):
+                # [Preparing the request]
+                # Only one of the fields "url_seed", "keyword_seed", or
+                # "keyword_and_url_seed" can be set on the request, depending on whether
+                # keywords, a page_url or both were passed to this function.
+                request: GenerateKeywordIdeasRequest
+                request = client.get_type("GenerateKeywordIdeasRequest")
+                request.customer_id = account_id
+                request.language = language_rn
+                request.geo_target_constants.extend(chunk)
+                request.keyword_plan_network = keyword_plan_network
+                request.include_adult_keywords = include_adult_keywords
 
-            year_month_range.start.year = date_start.year
-            # The month is 1-based, so we need to add 1 to the month to get the correct value.
-            year_month_range.start.month = date_start.month + 1
-            year_month_range.end.year = date_end.year
-            year_month_range.end.month = date_end.month + 1
+                # Properly create and set the year_month_range within historical_metrics_options
+                historical_metrics_options = client.get_type("HistoricalMetricsOptions")
+                year_month_range = historical_metrics_options.year_month_range
 
-            request.historical_metrics_options.CopyFrom(historical_metrics_options)
-            request.historical_metrics_options.include_average_cpc = include_average_cpc
+                year_month_range.start.year = date_start.year
+                # The month is 1-based, so we need to add 1 to the month to get the correct value.
+                year_month_range.start.month = date_start.month + 1
+                year_month_range.end.year = date_end.year
+                year_month_range.end.month = date_end.month + 1
 
-            # TODO admit a website URL as input NOSONAR
-            # To generate keyword ideas with only a page_url and no keywords we need
-            # to initialize a UrlSeed object with the page_url as the "url" field.
-            #     request.url_seed.url = page_url
+                request.historical_metrics_options.CopyFrom(historical_metrics_options)
+                request.historical_metrics_options.include_average_cpc = (
+                    include_average_cpc
+                )
 
-            # To generate keyword ideas with only a list of keywords and no page_url
-            # we need to initialize a KeywordSeed object and set the "keywords" field
-            # to be a list of StringValue objects.
-            request.keyword_seed.keywords.extend(keyword_texts)
+                # TODO admit a website URL as input NOSONAR
+                # To generate keyword ideas with only a page_url and no keywords we need
+                # to initialize a UrlSeed object with the page_url as the "url" field.
+                #     request.url_seed.url = page_url
 
-            # Make the request and collect the results
+                # To generate keyword ideas with only a list of keywords and no page_url
+                # we need to initialize a KeywordSeed object and set the "keywords" field
+                # to be a list of StringValue objects.
+                request.keyword_seed.keywords.extend(keyword_texts)
+
+                return keyword_plan_idea_service.generate_keyword_ideas(request=request)
+
+            LOGGER.warning(f"Chunk: {chunk}")
+            """# Make the request and collect the results
             keyword_ideas = keyword_plan_idea_service.generate_keyword_ideas(
                 request=request
             )
+            all_keyword_ideas.extend(keyword_ideas)"""
+            # Make the request with retry logic
+            keyword_ideas_pager = self.exponential_backoff_retry(
+                lambda c=chunk: request_keyword_ideas(c)
+            )
+            LOGGER.warning(f"Keyword ideas pager: {keyword_ideas_pager}")
+            LOGGER.warning(f"Iteration ID: {iteration_id}")
+
+            keyword_ideas = list(keyword_ideas_pager)
             all_keyword_ideas.extend(keyword_ideas)
+            iteration_ids.extend([iteration_id] * len(keyword_ideas))
 
         # Create empty lists to store data
         keywords = []
@@ -455,7 +546,7 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
                 adjusted_seasonality = std_dev / avg_search_volume
             seasonality.append(adjusted_seasonality)
 
-        # Create a DataFrame from the lists
+        # Create a DataFrame from the lists and include the iteration ID
         # TODO remove average cost per click when parameter is false
         data = {
             "Keyword": keywords,
@@ -480,6 +571,7 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
             "Top of Page Bid High Range (Currency) ": high_top_of_page_bid_micros,
             # Top of page bid low range (20th percentile) in micros for the keyword.
             "Top of Page Bid Low Range (Currency)": low_top_of_page_bid_micros,
+            "Iteration ID": iteration_ids,
         }
         # Convert missing values to 0
         for col in data:
@@ -510,3 +602,14 @@ def competition_to_text(competition_value):
 
 def micros_to_currency(micros):
     return micros / 1_000_000
+
+
+# Function to log better the exponential backoff retry
+def format_timestamp(timestamp):
+    # Calculate the time difference from the current time
+    delta = timedelta(seconds=(time.time() - timestamp))
+    days, seconds = divmod(delta.total_seconds(), 86400)  # 86400 seconds in a day
+    hours, seconds = divmod(seconds, 3600)  # 3600 seconds in an hour
+    minutes, seconds = divmod(seconds, 60)
+    microseconds = delta.microseconds
+    return f"{int(days):02}:{int(hours):02}:{int(minutes):02}:{int(seconds):02}.{microseconds:06}"
