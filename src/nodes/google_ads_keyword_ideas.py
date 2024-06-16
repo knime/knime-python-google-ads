@@ -100,7 +100,6 @@ LOGGER.warning(f"print dictionaries: {read_csv()}")
     node_type=knext.NodeType.MANIPULATOR,
     icon_path="icons/google_ads_keyword_ideas_logo.png",
     category=google_ads_ext.main_category,
-    keywords=["Google Ads", "Keyword Ideas", "Google Ads API", "Keyword Planner"],
 )
 @knext.input_port(
     "Google Client",
@@ -117,8 +116,12 @@ LOGGER.warning(f"print dictionaries: {read_csv()}")
 )
 # TODO: Add a new output table with the search volumes to check trends and seasonality
 @knext.output_table(
-    name="Keywords Ideas Monthly Search Volumes",
-    description="KNIME table with keyword ideas and the monthly search volumes to check trends and seasonality",
+    name="Keywords Ideas Aggregated data",
+    description="KNIME table with keyword ideas and the aggregated data such as the average monthly searches, competition, average CPC, and seasonality",
+)
+@knext.output_table(
+    name="Keywords Ideas Historical Monthly Search Volumes",
+    description="KNIME table with keyword ideas and the monthly search volumes to check trends and seasonality. The data is aggregated by month for the selected period (default is 12 months).",
 )
 class GoogleAdsKwdIdeas(knext.PythonNode):
 
@@ -227,6 +230,15 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
         is_advanced=True,
     )
 
+    rows_per_chunk = knext.IntParameter(
+        label="Rows per Chunk",
+        description="Number of rows per chunk to send to the Google Ads API. Maximumn number of rows per chunk is 10 and the minimum 1. Note that a list of row values will be added as new column in the output.",
+        default_value=1,
+        min_value=1,
+        max_value=10,
+        is_advanced=True,
+    )
+
     def configure(
         self,
         configure_context: knext.ConfigurationContext,
@@ -235,7 +247,6 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
         location_table_schema: knext.Schema,
     ):
         # TODO Check and throw config error maybe if spec.customer_id is not a string or does not have a specific format NOSONAR
-        # We will add one column of type double to the table
         # return input_table_schema.append(knext.Column(knext.string(), "Keyword Ideas"))
         if self.date_end < self.date_start:
             raise ValueError(
@@ -244,6 +255,8 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
 
         if self.keywords_column is None:
             raise knext.InvalidParametersError("No input column with Keywords selected")
+
+        return input_table_schema, location_table_schema
 
     def execute(
         self,
@@ -306,7 +319,7 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
 
         # Do the Keyword Ideas generation and return the table
 
-        df_table = self.generate_keywords_ideas_with_chunks(
+        df_table, df_monthly_search_volumes = self.generate_keywords_ideas_with_chunks(
             location_rns,
             account_id,
             client,
@@ -319,7 +332,9 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
             self.date_end,
             self.include_average_cpc,
         )
-        return knext.Table.from_pandas(df_table)
+        return knext.Table.from_pandas(df_table), knext.Table.from_pandas(
+            df_monthly_search_volumes
+        )
 
         # [END generate_keyword_ideas]
 
@@ -334,8 +349,6 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
         return [build_resource_name(location_id) for location_id in location_ids]
 
     # Function to chunk the location IDs into groups of 10
-    # TODO:append an identifer to the chunked groups to be able to identify them in the output table
-    # TODO: add a parameter to set the chunk size?
 
     # Initialize a deque to keep track of request timestamps
     request_timestamps = deque(maxlen=60)
@@ -404,6 +417,19 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
         it = iter(iterable)
         return iter(lambda: tuple(islice(it, size)), ())
 
+    # Function to parse monthly search volumes and convert to DataFrame
+    def parse_monthly_search_volumes(self, monthly_search_volumes, keyword):
+        rows = [
+            {
+                "keyword": keyword,
+                "month": metrics.month,
+                "year": metrics.year,
+                "monthly searches": metrics.monthly_searches,
+            }
+            for metrics in monthly_search_volumes
+        ]
+        return pd.DataFrame(rows)
+
     # Function to generate keyword ideas with chunks
     def generate_keywords_ideas_with_chunks(
         self,
@@ -419,10 +445,12 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
         date_end,
         include_average_cpc,
     ):
-        location_chunks = self.chunked(location_rns, 10)
+        location_chunks = self.chunked(location_rns, self.rows_per_chunk)
         LOGGER.warning(f"Location chunks: {location_chunks}")
         all_keyword_ideas = []
         iteration_ids = []
+        # Create empty lists to store list of location IDs used on each iteration
+        location_ids = []
 
         # Clear the request timestamps for a new batch of requests
         self.request_timestamps.clear()
@@ -471,11 +499,7 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
                 return keyword_plan_idea_service.generate_keyword_ideas(request=request)
 
             LOGGER.warning(f"Chunk: {chunk}")
-            """# Make the request and collect the results
-            keyword_ideas = keyword_plan_idea_service.generate_keyword_ideas(
-                request=request
-            )
-            all_keyword_ideas.extend(keyword_ideas)"""
+
             # Make the request with retry logic
             keyword_ideas_pager = self.exponential_backoff_retry(
                 lambda c=chunk: request_keyword_ideas(c)
@@ -486,9 +510,11 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
             keyword_ideas = list(keyword_ideas_pager)
             all_keyword_ideas.extend(keyword_ideas)
             iteration_ids.extend([iteration_id] * len(keyword_ideas))
+            # Append the location IDs (list) used on each iteration
+            location_ids.extend([chunk] * len(keyword_ideas))
 
         # Create empty lists to store data
-        keywords = []
+        keywords_ideas = []
         avg_monthly_searches = []
         competition_values = []
         competition_index = []
@@ -498,10 +524,14 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
         search_volumes = []
         seasonality = []
 
+        # create a list to store the monthly search volumes to output in a separate table
+
+        monthly_search_volumes_dfs = []
+
         # Extract data and populate lists
         for idea in all_keyword_ideas:
 
-            keywords.append(idea.text)
+            keywords_ideas.append(idea.text)
             avg_monthly_searches.append(idea.keyword_idea_metrics.avg_monthly_searches)
             competition_values.append(
                 competition_to_text(idea.keyword_idea_metrics.competition)
@@ -525,6 +555,13 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
             # Calculate the total search volume of the period
             search_volumes.append(sum(monthly_search_volumes))
 
+            # Append the monthly search volumes to the list to output in a separate table
+
+            monthly_df = self.parse_monthly_search_volumes(
+                idea.keyword_idea_metrics.monthly_search_volumes, idea.text
+            )
+            monthly_search_volumes_dfs.append(monthly_df)
+
             # Calculate the seasonality of the search volumes
             if not monthly_search_volumes:
                 adjusted_seasonality = None
@@ -547,13 +584,14 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
             seasonality.append(adjusted_seasonality)
 
         # Create a DataFrame from the lists and include the iteration ID
-        # TODO remove average cost per click when parameter is false
         data = {
-            "Keyword": keywords,
+            "Keyword Idea": keywords_ideas,
             # Approximate number of monthly searches on this query averaged for the selected period (default is 12 months)
-            "Avg Monthly Searches": avg_monthly_searches,
+            "Average Monthly Searches": avg_monthly_searches,
             # Approximate number of searches on this query for the past twelve months.
             "Total Searches of the Period": search_volumes,
+            # Average cost per click for the query.
+            "Average Cost per Click": average_cpc_micros,
             # Calculated the trend line, residuals, standard deviation of residuals, and adjusted seasonality for the provided monthly search volumes data.
             # Reference article: https://blog.startupstash.com/detect-seasonality-within-keyword-planner-data-in-google-sheets-eb9c3dabbe53
             "Searches Seasonality": seasonality,
@@ -565,19 +603,26 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
             # divided by the total number of ad slots available. If not enough data
             # is available, undef will be returned.
             "Competition Index": competition_index,
-            "Average Cost per Click": average_cpc_micros,
             # Top of page bid high range (80th percentile) in micros for the
             # keyword.
             "Top of Page Bid High Range (Currency) ": high_top_of_page_bid_micros,
             # Top of page bid low range (20th percentile) in micros for the keyword.
             "Top of Page Bid Low Range (Currency)": low_top_of_page_bid_micros,
-            "Iteration ID": iteration_ids,
+            "Chunk Number": iteration_ids,
+            "Locations in Chunk": location_ids,
         }
-        # Convert missing values to 0
-        for col in data:
-            data[col] = [0 if pd.isnull(val) else val for val in data[col]]
-        df = pd.DataFrame(data)
-        return df
+
+        # Dataframe with the keyword ideas and the aggregated data for the first output table
+        df = pd.DataFrame(convert_missing_to_zero(data))
+
+        if include_average_cpc == False:
+            df = df.drop(columns=["Average Cost per Click"])
+
+        df_monthly_search_volumes = pd.concat(
+            monthly_search_volumes_dfs, ignore_index=True
+        )
+
+        return df, df_monthly_search_volumes
 
 
 # Function to use in the date_start ane date_end validators to check if the input date is greater than four years from the current date
@@ -613,3 +658,17 @@ def format_timestamp(timestamp):
     minutes, seconds = divmod(seconds, 60)
     microseconds = delta.microseconds
     return f"{int(days):02}:{int(hours):02}:{int(minutes):02}:{int(seconds):02}.{microseconds:06}"
+
+
+def convert_missing_to_zero(data):
+    # Convert missing values to 0
+    for col in data:
+        if isinstance(data[col][0], list):  # Check if the column contains arrays
+            data[col] = [
+                [0 if pd.isnull(item) else item for item in val] for val in data[col]
+            ]
+        else:
+            data[col] = [0 if pd.isnull(val) else val for val in data[col]]
+
+    df = pd.DataFrame(data)
+    return df
