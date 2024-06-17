@@ -14,6 +14,7 @@ from google.ads.googleads.errors import GoogleAdsException
 from google.ads.googleads.v16.services.types.keyword_plan_idea_service import (
     GenerateKeywordIdeasRequest,
 )
+from util.utils import check_canceled
 
 
 LOGGER = logging.getLogger(__name__)
@@ -188,11 +189,24 @@ def exponential_backoff_retry(func, max_attempts=5, initial_delay=5):
                         0, delay
                     )  # Add jitter to avoid thundering herd problem
                 else:
-                    LOGGER.warning("Max attempts reached, raising the exception.")
-                    raise
+                    max_attemps_error_mssg = (
+                        "Max attempts reached, raising the exception."
+                    )
+                    raise knext.InvalidParametersError(max_attemps_error_mssg)
             else:
-                LOGGER.warning(f"Non-retryable error encountered: {ex}")
-                raise
+                status_error = ex.error.code().name
+                error_messages = ""
+                for error in ex.failure.errors:
+                    error_messages = " ".join([error.message])
+                error_first_part = " ".join(
+                    [
+                        "Failed with status",
+                        status_error,
+                    ]
+                )
+                error_second_part = " ".join([error_messages])
+                error_to_raise = ". ".join([error_first_part, error_second_part])
+                raise knext.InvalidParametersError(error_to_raise)
 
 
 # Define a function to chunk the location
@@ -234,6 +248,7 @@ def generate_keywords_ideas_with_chunks(
     date_end,
     include_average_cpc,
     keyword_ideas_mode,
+    exec_context,
 ):
     location_chunks = chunked(location_rns, self.rows_per_chunk)
     LOGGER.warning(f"Location chunks: {location_chunks}")
@@ -247,12 +262,21 @@ def generate_keywords_ideas_with_chunks(
     LOGGER.warning(f"Request timestamps cleared: {request_timestamps}")
 
     for iteration_id, chunk in enumerate(location_chunks, start=1):
+        # cancel the execution if the user cancels the execution
+        check_canceled(exec_context)
 
         def request_keyword_ideas(chunk):
             # [Preparing the request]
             # Only one of the fields "url_seed", "keyword_seed" can be set on the request, depending on whether
             # keywords, a page_url were passed to this function.
             if keyword_ideas_mode == "URL":
+
+                # Check for missing values in keyword_texts
+                if any(url is None or pd.isna(url) for url in keyword_texts):
+                    raise knext.InvalidParametersError(
+                        "One or more URLs from the provided input table are missing values. The Google Ads API does not allow this. Tip: To handle missing values, add a Missing Value step upstream."
+                    )
+
                 for url in keyword_texts:
                     # Create a new request object for each URL
                     request: GenerateKeywordIdeasRequest
@@ -297,6 +321,11 @@ def generate_keywords_ideas_with_chunks(
                     all_keyword_ideas.extend(keyword_ideas)
 
             elif keyword_ideas_mode == "KEYWORDS":
+                # Check for missing values in keyword_texts
+                if any(kw is None or pd.isna(kw) for kw in keyword_texts):
+                    raise knext.InvalidParametersError(
+                        "One or more keywords from the provided input table are missing values. The Google Ads API does not allow this. Tip: To handle missing values, add a Missing Value step upstream."
+                    )
 
                 # Split keyword_texts into chunks of 20 keywords each
                 for i in range(0, len(keyword_texts), 20):

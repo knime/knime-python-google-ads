@@ -45,8 +45,15 @@
 
 import knime.extension as knext
 import logging
+from typing import Callable, List
+from abc import ABC, abstractmethod
+import re
+import pandas as pd
+import pyarrow as pa
+import pyarrow.compute as pc
 
 LOGGER = logging.getLogger(__name__)
+
 
 def check_canceled(exec_context: knext.ExecutionContext) -> None:
     """
@@ -54,3 +61,20 @@ def check_canceled(exec_context: knext.ExecutionContext) -> None:
     """
     if exec_context.is_canceled():
         raise RuntimeError("Execution canceled")
+
+
+def check_column(
+    input_table: knext.Schema,
+    column_name: str,
+    expected_type: knext.KnimeType,
+    column_purpose: str,
+) -> None:
+    """
+    Raises an InvalidParametersError if a column named column_name is not contained in input_table or has the wrong KnimeType.
+    """
+
+    ktype = input_table[column_name].ktype
+    if ktype != expected_type:
+        raise knext.InvalidParametersError(
+            f"The {column_purpose} column '{column_name}' is of type {str(ktype)} but should be of type {str(expected_type)}. If you want to use the column '{column_name}' as {column_purpose} column, please change the column type to {str(expected_type)}. Tip: Use the String Manipulation node to convert the column type."
+        )

@@ -75,6 +75,7 @@ from dateutil.relativedelta import relativedelta
 from google.ads.googleads.errors import GoogleAdsException
 
 import util.keyword_ideas_utils as keyword_ideas_utils
+from util.utils import check_column
 
 
 LOGGER = logging.getLogger(__name__)
@@ -239,15 +240,32 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
         input_table_schema: knext.Schema,
         location_table_schema: knext.Schema,
     ):
-        # TODO Check and throw config error maybe if spec.customer_id is not a string or does not have a specific format NOSONAR
-        # return input_table_schema.append(knext.Column(knext.string(), "Keyword Ideas"))
+        # TODO Properly set up the config method passing the specs of the two returned tables
         if self.date_end < self.date_start:
             raise ValueError(
                 "The end date cannot be set up for a date earlier than the start date. Please set an end date later than the start date."
             )
-
         if self.keywords_column is None:
-            raise knext.InvalidParametersError("No input column with Keywords selected")
+            raise knext.InvalidParametersError(
+                "No input column with Keywords or Webpage URLs selected"
+            )
+        if self.locations_column is None:
+            raise knext.InvalidParametersError(
+                "There is no input column with Location IDs selected. Tip: Use the Google Ads Geo Targets node to generate compatible Location IDs for the Google Ads API."
+            )
+
+        if self.keywords_column:
+            check_column(
+                input_table_schema, self.keywords_column, knext.string(), "seed"
+            )
+
+        if self.locations_column:
+            check_column(
+                location_table_schema,
+                self.locations_column,
+                knext.int64(),
+                "locations",
+            )
 
         return None, None
 
@@ -258,11 +276,9 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
         input_table: knext.Table,
         location_table: knext.Table,
     ) -> knext.Table:
-
+        exec_context.set_warning
         # Get the language id from the language selection enumparameter
         language_id = keyword_ideas_utils.get_criterion_id(self.language_selection)
-
-        # TODO make optional the page url provider to generate ideas also from there! NOSONAR
 
         # Get the location IDs from the location table
         location_ids_column = location_table.to_pandas()
@@ -329,6 +345,7 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
                 self.date_end,
                 self.include_average_cpc,
                 self.keyword_ideas_mode,
+                exec_context,
             )
         )
         return knext.Table.from_pandas(
