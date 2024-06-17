@@ -46,12 +46,6 @@
 import logging
 import knime.extension as knext
 import google_ads_ext
-import pandas as pd
-import numpy as np
-from itertools import islice
-import time
-import random
-from collections import deque
 from util.common import (
     GoogleAdObjectSpec,
     GoogleAdConnectionObject,
@@ -76,12 +70,11 @@ from google.ads.googleads.v16.enums.types.keyword_plan_competition_level import 
 from google.ads.googleads.v16.enums.types.keyword_plan_network import (
     KeywordPlanNetworkEnum,
 )
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from dateutil.relativedelta import relativedelta
 from google.ads.googleads.errors import GoogleAdsException
 
 import util.keyword_ideas_utils as keyword_ideas_utils
-from google.ads.googleads.v16.errors.types.quota_error import QuotaErrorEnum
 
 
 LOGGER = logging.getLogger(__name__)
@@ -106,7 +99,6 @@ LOGGER = logging.getLogger(__name__)
     name="Location IDs",
     description="KNIME table that contains a list of location IDs to target",
 )
-# TODO: Add a new output table with the search volumes to check trends and seasonality
 @knext.output_table(
     name="Keywords Ideas Aggregated data",
     description="KNIME table with keyword ideas and the aggregated data such as the average monthly searches, competition, average CPC, and seasonality",
@@ -117,9 +109,18 @@ LOGGER = logging.getLogger(__name__)
 )
 class GoogleAdsKwdIdeas(knext.PythonNode):
 
+    keyword_ideas_mode = knext.EnumParameter(
+        label="Keyword Ideas Input Mode",
+        description="Choose to generate new keyword ideas from **keywords** OR **webpage URLs** and select the input column accordingly.",
+        default_value=keyword_ideas_utils.NewKeywordIdeasMode.KEYWORDS.name,
+        style=knext.EnumParameter.Style.VALUE_SWITCH,
+        enum=keyword_ideas_utils.NewKeywordIdeasMode,
+        is_advanced=False,
+    )
+
     keywords_column = knext.ColumnParameter(
-        "Keywords Column",
-        "KNIME table column containing the kewyords from which fetch the ideas with the search volume",
+        "Seed Column",
+        "KNIME table column containing the kewyords or webpage URLs from which fetch the ideas with the search volume",
         port_index=1,
         include_row_key=False,
         include_none_column=False,
@@ -248,7 +249,7 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
         if self.keywords_column is None:
             raise knext.InvalidParametersError("No input column with Keywords selected")
 
-        return input_table_schema, location_table_schema
+        return None, None
 
     def execute(
         self,
@@ -275,6 +276,8 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
             exec_context.set_warning("No column selected")
 
         keyword_texts = keyword_texts_df[keywords_column].tolist()
+
+        LOGGER.warning(f"Keyword texts: {keyword_texts}")
 
         # Creating the Google Ads Client object
         client: GoogleAdsClient
@@ -312,7 +315,8 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
         # Do the Keyword Ideas generation and return the table
 
         df_keyword_ideas_aggregated, df_monthly_search_volumes = (
-            self.generate_keywords_ideas_with_chunks(
+            keyword_ideas_utils.generate_keywords_ideas_with_chunks(
+                self,
                 location_rns,
                 account_id,
                 client,
@@ -324,6 +328,7 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
                 self.date_start,
                 self.date_end,
                 self.include_average_cpc,
+                self.keyword_ideas_mode,
             )
         )
         return knext.Table.from_pandas(
@@ -331,307 +336,3 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
         ), knext.Table.from_pandas(df_monthly_search_volumes)
 
         # [END generate_keyword_ideas]
-
-    # Function to chunk the location IDs into groups of 10
-
-    # Initialize a deque to keep track of request timestamps
-    request_timestamps = deque(maxlen=60)
-
-    # Define a function to retry the request with exponential backoff if a RESOURCE_EXHAUSTED error occurs.
-    # Max requests per min are 60: 1 request per second
-    # Quota reference website: https://developers.google.com/google-ads/api/docs/best-practices/quotas#planning_services
-
-    def exponential_backoff_retry(self, func, max_attempts=5, initial_delay=5):
-        delay = initial_delay
-        LOGGER.warning(f"Initial delay: {delay}")
-
-        for attempt in range(max_attempts):
-            LOGGER.warning(f"Attempt {attempt+1} of {max_attempts}")
-            try:
-                # Rate limiting check
-                if self.request_timestamps:
-                    time_since_last_request = time.time() - self.request_timestamps[-1]
-                    formatted_time = format_timestamp(time_since_last_request)
-                    LOGGER.warning(f"Time since last request: {formatted_time}")
-                    if time_since_last_request < 1:
-                        sleep_time = 1 - time_since_last_request
-                        formatted_sleep_time = format_timestamp(sleep_time)
-                        LOGGER.warning(
-                            f"Sleeping for {formatted_sleep_time} seconds due to rate limiting"
-                        )
-                        time.sleep(sleep_time)
-
-                # Make the request and record the timestamp
-                result = func()
-                self.request_timestamps.append(time.time())
-                formatted_request_timestamps = [
-                    format_timestamp(ts) for ts in self.request_timestamps
-                ]
-                LOGGER.warning(f"Request timestamps: {formatted_request_timestamps}")
-                LOGGER.warning(
-                    f"Length of request timestamps: {len(self.request_timestamps)}"
-                )
-                return result
-
-            except GoogleAdsException as ex:
-                error_code = ex.failure.errors[0].error_code
-                LOGGER.warning(f"Error code: {error_code.quota_error}")
-                if (
-                    error_code.quota_error == QuotaErrorEnum.RESOURCE_EXHAUSTED
-                    or ex.error.code() == 8  # StatusCode.RESOURCE_EXHAUSTED
-                ):
-                    if attempt < max_attempts - 1:
-                        LOGGER.warning(
-                            f"Attempt {attempt+1} failed due to RESOURCE_EXHAUSTED. Retrying in {delay} seconds..."
-                        )
-                        time.sleep(delay)
-                        delay *= 2  # Exponential backoff
-                        delay += random.uniform(
-                            0, delay
-                        )  # Add jitter to avoid thundering herd problem
-                    else:
-                        LOGGER.warning("Max attempts reached, raising the exception.")
-                        raise
-                else:
-                    LOGGER.warning(f"Non-retryable error encountered: {ex}")
-                    raise
-
-    # Define a function to chunk the location
-    def chunked(self, iterable, size):
-        it = iter(iterable)
-        return iter(lambda: tuple(islice(it, size)), ())
-
-    # Function to parse monthly search volumes and convert to DataFrame
-    # TODO append iteration ID and Location IDs to the output table NOSONAR
-    def parse_monthly_search_volumes(
-        self, monthly_search_volumes, keyword, iteration_id, location_ids
-    ):
-        rows = [
-            {
-                "keyword": keyword,
-                "month": metrics.month,
-                "year": metrics.year,
-                "monthly searches": metrics.monthly_searches,
-                "iteration_id": iteration_id,
-                "location_ids": location_ids,
-            }
-            for metrics in monthly_search_volumes
-        ]
-        return pd.DataFrame(rows)
-
-    # Function to generate keyword ideas with chunks
-    def generate_keywords_ideas_with_chunks(
-        self,
-        location_rns,
-        account_id,
-        client,
-        keyword_plan_idea_service,
-        keyword_texts,
-        language_rn,
-        keyword_plan_network,
-        include_adult_keywords,
-        date_start,
-        date_end,
-        include_average_cpc,
-    ):
-        location_chunks = self.chunked(location_rns, self.rows_per_chunk)
-        LOGGER.warning(f"Location chunks: {location_chunks}")
-        all_keyword_ideas = []
-        iteration_ids = []
-        # Create empty lists to store list of location IDs used on each iteration
-        location_ids = []
-
-        # Clear the request timestamps for a new batch of requests
-        self.request_timestamps.clear()
-        LOGGER.warning(f"Request timestamps cleared: {self.request_timestamps}")
-
-        for iteration_id, chunk in enumerate(location_chunks, start=1):
-
-            def request_keyword_ideas(chunk):
-                # [Preparing the request]
-                # Only one of the fields "url_seed", "keyword_seed", or
-                # "keyword_and_url_seed" can be set on the request, depending on whether
-                # keywords, a page_url or both were passed to this function.
-                request: GenerateKeywordIdeasRequest
-                request = client.get_type("GenerateKeywordIdeasRequest")
-                request.customer_id = account_id
-                request.language = language_rn
-                request.geo_target_constants.extend(chunk)
-                request.keyword_plan_network = keyword_plan_network
-                request.include_adult_keywords = include_adult_keywords
-
-                # Properly create and set the year_month_range within historical_metrics_options
-                historical_metrics_options = client.get_type("HistoricalMetricsOptions")
-                year_month_range = historical_metrics_options.year_month_range
-
-                year_month_range.start.year = date_start.year
-                # The month is 1-based, so we need to add 1 to the month to get the correct value.
-                year_month_range.start.month = date_start.month + 1
-                year_month_range.end.year = date_end.year
-                year_month_range.end.month = date_end.month + 1
-
-                request.historical_metrics_options.CopyFrom(historical_metrics_options)
-                request.historical_metrics_options.include_average_cpc = (
-                    include_average_cpc
-                )
-
-                # TODO admit a website URL as input NOSONAR
-                # To generate keyword ideas with only a page_url and no keywords we need
-                # to initialize a UrlSeed object with the page_url as the "url" field.
-                #     request.url_seed.url = page_url
-
-                # To generate keyword ideas with only a list of keywords and no page_url
-                # we need to initialize a KeywordSeed object and set the "keywords" field
-                # to be a list of StringValue objects.
-                request.keyword_seed.keywords.extend(keyword_texts)
-
-                return keyword_plan_idea_service.generate_keyword_ideas(request=request)
-
-            LOGGER.warning(f"Chunk: {chunk}")
-
-            # Make the request with retry logic
-            keyword_ideas_pager = self.exponential_backoff_retry(
-                lambda c=chunk: request_keyword_ideas(c)
-            )
-            LOGGER.warning(f"Keyword ideas pager: {keyword_ideas_pager}")
-            LOGGER.warning(f"Iteration ID: {iteration_id}")
-
-            keyword_ideas = list(keyword_ideas_pager)
-            all_keyword_ideas.extend(keyword_ideas)
-            iteration_ids.extend([iteration_id] * len(keyword_ideas))
-            # Append the location IDs (list) used on each iteration
-            location_ids.extend([chunk] * len(keyword_ideas))
-            LOGGER.warning(f"Location IDs: {location_ids}")
-
-        # Create empty lists to store data
-        keywords_ideas = []
-        avg_monthly_searches = []
-        competition_values = []
-        competition_index = []
-        average_cpc_micros = []
-        high_top_of_page_bid_micros = []
-        low_top_of_page_bid_micros = []
-        search_volumes = []
-        seasonality = []
-
-        # create a list to store the monthly search volumes to output in a separate table
-
-        monthly_search_volumes_dfs = []
-
-        # Extract data and populate lists
-        for idea, iteration_id, location_id in zip(
-            all_keyword_ideas, iteration_ids, location_ids
-        ):
-            # for idea in all_keyword_ideas:
-
-            keywords_ideas.append(idea.text)
-            avg_monthly_searches.append(idea.keyword_idea_metrics.avg_monthly_searches)
-            competition_values.append(
-                keyword_ideas_utils.competition_to_text(
-                    idea.keyword_idea_metrics.competition
-                )
-            )
-            competition_index.append(idea.keyword_idea_metrics.competition_index)
-            average_cpc_micros.append(
-                keyword_ideas_utils.micros_to_currency(
-                    idea.keyword_idea_metrics.average_cpc_micros
-                )
-            )
-            high_top_of_page_bid_micros.append(
-                keyword_ideas_utils.micros_to_currency(
-                    idea.keyword_idea_metrics.high_top_of_page_bid_micros
-                )
-            )
-            low_top_of_page_bid_micros.append(
-                keyword_ideas_utils.micros_to_currency(
-                    idea.keyword_idea_metrics.low_top_of_page_bid_micros
-                )
-            )
-            monthly_search_volumes = [
-                metrics.monthly_searches
-                for metrics in idea.keyword_idea_metrics.monthly_search_volumes
-            ]
-            # Calculate the total search volume of the period
-            search_volumes.append(sum(monthly_search_volumes))
-
-            # Append the monthly search volumes to the list to output in a separate table
-
-            monthly_df = self.parse_monthly_search_volumes(
-                idea.keyword_idea_metrics.monthly_search_volumes,
-                idea.text,
-                iteration_id,
-                location_id,
-            )
-            monthly_search_volumes_dfs.append(monthly_df)
-
-            # Calculate the seasonality of the search volumes
-            if not monthly_search_volumes:
-                adjusted_seasonality = None
-            else:
-                # Calculate trend line using linear regression
-                x = np.arange(len(monthly_search_volumes))
-                y = monthly_search_volumes
-                coefficients = np.polyfit(x, y, 1)
-                trend_line = np.polyval(coefficients, x)
-
-                # Calculate residuals
-                residuals = y - trend_line
-
-                # Calculate standard deviation of residuals
-                std_dev = np.std(residuals)
-
-                # Adjust seasonality
-                avg_search_volume = np.mean(monthly_search_volumes)
-                adjusted_seasonality = std_dev / avg_search_volume
-            seasonality.append(adjusted_seasonality)
-
-        # Create a DataFrame from the lists and include the iteration ID
-        data = {
-            "Keyword Idea": keywords_ideas,
-            # Approximate number of monthly searches on this query averaged for the selected period (default is 12 months)
-            "Average Monthly Searches": avg_monthly_searches,
-            # Approximate number of searches on this query for the past twelve months.
-            "Total Searches of the Period": search_volumes,
-            # Average cost per click for the query.
-            "Average Cost per Click": average_cpc_micros,
-            # Calculated the trend line, residuals, standard deviation of residuals, and adjusted seasonality for the provided monthly search volumes data.
-            # Reference article: https://blog.startupstash.com/detect-seasonality-within-keyword-planner-data-in-google-sheets-eb9c3dabbe53
-            "Searches Seasonality": seasonality,
-            # The competition level for this search query.
-            "Competition": competition_values,
-            # The competition index for the query in the range [0, 100]. This shows
-            # how competitive ad placement is for a keyword. The level of
-            # competition from 0-100 is determined by the number of ad slots filled
-            # divided by the total number of ad slots available. If not enough data
-            # is available, undef will be returned.
-            "Competition Index": competition_index,
-            # Top of page bid high range (80th percentile) in micros for the
-            # keyword.
-            "Top of Page Bid High Range (Currency) ": high_top_of_page_bid_micros,
-            # Top of page bid low range (20th percentile) in micros for the keyword.
-            "Top of Page Bid Low Range (Currency)": low_top_of_page_bid_micros,
-            "Chunk Number": iteration_ids,
-            "Locations in Chunk": location_ids,
-        }
-
-        # Dataframe with the keyword ideas and the aggregated data for the first output table
-        df = pd.DataFrame(keyword_ideas_utils.convert_missing_to_zero(data))
-
-        if include_average_cpc == False:
-            df = df.drop(columns=["Average Cost per Click"])
-
-        df_monthly_search_volumes = pd.concat(
-            monthly_search_volumes_dfs, ignore_index=True
-        )
-        return df, df_monthly_search_volumes
-
-
-# Function to log better the exponential backoff retry
-def format_timestamp(timestamp):
-    # Calculate the time difference from the current time
-    delta = timedelta(seconds=(time.time() - timestamp))
-    days, seconds = divmod(delta.total_seconds(), 86400)  # 86400 seconds in a day
-    hours, seconds = divmod(seconds, 3600)  # 3600 seconds in an hour
-    minutes, seconds = divmod(seconds, 60)
-    microseconds = delta.microseconds
-    return f"{int(days):02}:{int(hours):02}:{int(minutes):02}:{int(seconds):02}.{microseconds:06}"
