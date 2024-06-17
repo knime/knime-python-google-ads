@@ -79,20 +79,12 @@ from google.ads.googleads.v16.enums.types.keyword_plan_network import (
 from datetime import date, datetime, timedelta
 from dateutil.relativedelta import relativedelta
 from google.ads.googleads.errors import GoogleAdsException
-import util.utils as utils
-from util.data_utils import (
-    read_csv,
-    get_criterion_id,
-    convert_to_list,
-    LanguageSelection,
-)
+
+import util.keyword_ideas_utils as keyword_ideas_utils
 from google.ads.googleads.v16.errors.types.quota_error import QuotaErrorEnum
 
 
 LOGGER = logging.getLogger(__name__)
-
-
-LOGGER.warning(f"print dictionaries: {read_csv()}")
 
 
 @knext.node(
@@ -147,8 +139,8 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
     language_selection = knext.EnumParameter(
         label="Language",
         description="Select the language to target.",
-        default_value=LanguageSelection.ENGLISH.name,
-        enum=LanguageSelection,
+        default_value=keyword_ideas_utils.LanguageSelection.ENGLISH.name,
+        enum=keyword_ideas_utils.LanguageSelection,
         style=knext.EnumParameter.Style.DROPDOWN,
     )
 
@@ -181,7 +173,7 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
             raise ValueError(
                 "The start date cannot be set up for the current month. Please set a start date at least one month ahead."
             )
-        elif datediff_in_years(value, date.today()) > 4:
+        elif keyword_ideas_utils.datediff_in_years(value, date.today()) > 4:
             raise ValueError(
                 "The start date cannot be set up for a date greater than four years from the current date. Please set a start date within the last four years."
             )
@@ -212,10 +204,19 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
             raise ValueError(
                 "The end date cannot be set up for the current month. Please set an end date at least one month ahead."
             )
-        elif datediff_in_years(value, date.today()) > 4:
+        elif keyword_ideas_utils.datediff_in_years(value, date.today()) > 4:
             raise ValueError(
                 "The end date cannot be set up for a date greater than four years from the current date. Please set an end date within the last four years."
             )
+
+    rows_per_chunk = knext.IntParameter(
+        label="Rows per Chunk",
+        description="Number of rows per chunk to send to the Google Ads API. Maximumn number of rows per chunk is 10 and the minimum 1. Note that a list of row values will be added as new column in the output.",
+        default_value=1,
+        min_value=1,
+        max_value=10,
+        is_advanced=True,
+    )
 
     include_adult_keywords = knext.BoolParameter(
         label="Include Adult Keywords",
@@ -227,15 +228,6 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
         label="Include Average CPC",
         description="Indicates whether to include average cost per click value. Average CPC is provided only for legacy support. Default is True.",
         default_value=True,
-        is_advanced=True,
-    )
-
-    rows_per_chunk = knext.IntParameter(
-        label="Rows per Chunk",
-        description="Number of rows per chunk to send to the Google Ads API. Maximumn number of rows per chunk is 10 and the minimum 1. Note that a list of row values will be added as new column in the output.",
-        default_value=1,
-        min_value=1,
-        max_value=10,
         is_advanced=True,
     )
 
@@ -267,7 +259,7 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
     ) -> knext.Table:
 
         # Get the language id from the language selection enumparameter
-        language_id = get_criterion_id(self.language_selection)
+        language_id = keyword_ideas_utils.get_criterion_id(self.language_selection)
 
         # TODO make optional the page url provider to generate ideas also from there! NOSONAR
 
@@ -307,7 +299,7 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
         )
 
         # List the location IDs
-        location_rns = self.map_locations_ids_to_resource_names(
+        location_rns = keyword_ideas_utils.map_locations_ids_to_resource_names(
             client, location_ids_list
         )
 
@@ -319,34 +311,26 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
 
         # Do the Keyword Ideas generation and return the table
 
-        df_table, df_monthly_search_volumes = self.generate_keywords_ideas_with_chunks(
-            location_rns,
-            account_id,
-            client,
-            keyword_plan_idea_service,
-            keyword_texts,
-            language_rn,
-            keyword_plan_network,
-            self.include_adult_keywords,
-            self.date_start,
-            self.date_end,
-            self.include_average_cpc,
+        df_keyword_ideas_aggregated, df_monthly_search_volumes = (
+            self.generate_keywords_ideas_with_chunks(
+                location_rns,
+                account_id,
+                client,
+                keyword_plan_idea_service,
+                keyword_texts,
+                language_rn,
+                keyword_plan_network,
+                self.include_adult_keywords,
+                self.date_start,
+                self.date_end,
+                self.include_average_cpc,
+            )
         )
-        return knext.Table.from_pandas(df_table), knext.Table.from_pandas(
-            df_monthly_search_volumes
-        )
+        return knext.Table.from_pandas(
+            df_keyword_ideas_aggregated
+        ), knext.Table.from_pandas(df_monthly_search_volumes)
 
         # [END generate_keyword_ideas]
-
-    def map_locations_ids_to_resource_names(
-        self, port_object: GoogleAdsClient, location_ids
-    ):
-        client = port_object
-
-        build_resource_name_client: GeoTargetConstantServiceClient
-        build_resource_name_client = client.get_service("GeoTargetConstantService")
-        build_resource_name = build_resource_name_client.geo_target_constant_path
-        return [build_resource_name(location_id) for location_id in location_ids]
 
     # Function to chunk the location IDs into groups of 10
 
@@ -418,13 +402,18 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
         return iter(lambda: tuple(islice(it, size)), ())
 
     # Function to parse monthly search volumes and convert to DataFrame
-    def parse_monthly_search_volumes(self, monthly_search_volumes, keyword):
+    # TODO append iteration ID and Location IDs to the output table NOSONAR
+    def parse_monthly_search_volumes(
+        self, monthly_search_volumes, keyword, iteration_id, location_ids
+    ):
         rows = [
             {
                 "keyword": keyword,
                 "month": metrics.month,
                 "year": metrics.year,
                 "monthly searches": metrics.monthly_searches,
+                "iteration_id": iteration_id,
+                "location_ids": location_ids,
             }
             for metrics in monthly_search_volumes
         ]
@@ -512,6 +501,7 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
             iteration_ids.extend([iteration_id] * len(keyword_ideas))
             # Append the location IDs (list) used on each iteration
             location_ids.extend([chunk] * len(keyword_ideas))
+            LOGGER.warning(f"Location IDs: {location_ids}")
 
         # Create empty lists to store data
         keywords_ideas = []
@@ -529,24 +519,33 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
         monthly_search_volumes_dfs = []
 
         # Extract data and populate lists
-        for idea in all_keyword_ideas:
+        for idea, iteration_id, location_id in zip(
+            all_keyword_ideas, iteration_ids, location_ids
+        ):
+            # for idea in all_keyword_ideas:
 
             keywords_ideas.append(idea.text)
             avg_monthly_searches.append(idea.keyword_idea_metrics.avg_monthly_searches)
             competition_values.append(
-                competition_to_text(idea.keyword_idea_metrics.competition)
+                keyword_ideas_utils.competition_to_text(
+                    idea.keyword_idea_metrics.competition
+                )
             )
             competition_index.append(idea.keyword_idea_metrics.competition_index)
             average_cpc_micros.append(
-                micros_to_currency(idea.keyword_idea_metrics.average_cpc_micros)
+                keyword_ideas_utils.micros_to_currency(
+                    idea.keyword_idea_metrics.average_cpc_micros
+                )
             )
             high_top_of_page_bid_micros.append(
-                micros_to_currency(
+                keyword_ideas_utils.micros_to_currency(
                     idea.keyword_idea_metrics.high_top_of_page_bid_micros
                 )
             )
             low_top_of_page_bid_micros.append(
-                micros_to_currency(idea.keyword_idea_metrics.low_top_of_page_bid_micros)
+                keyword_ideas_utils.micros_to_currency(
+                    idea.keyword_idea_metrics.low_top_of_page_bid_micros
+                )
             )
             monthly_search_volumes = [
                 metrics.monthly_searches
@@ -558,7 +557,10 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
             # Append the monthly search volumes to the list to output in a separate table
 
             monthly_df = self.parse_monthly_search_volumes(
-                idea.keyword_idea_metrics.monthly_search_volumes, idea.text
+                idea.keyword_idea_metrics.monthly_search_volumes,
+                idea.text,
+                iteration_id,
+                location_id,
             )
             monthly_search_volumes_dfs.append(monthly_df)
 
@@ -613,7 +615,7 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
         }
 
         # Dataframe with the keyword ideas and the aggregated data for the first output table
-        df = pd.DataFrame(convert_missing_to_zero(data))
+        df = pd.DataFrame(keyword_ideas_utils.convert_missing_to_zero(data))
 
         if include_average_cpc == False:
             df = df.drop(columns=["Average Cost per Click"])
@@ -621,32 +623,7 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
         df_monthly_search_volumes = pd.concat(
             monthly_search_volumes_dfs, ignore_index=True
         )
-
         return df, df_monthly_search_volumes
-
-
-# Function to use in the date_start ane date_end validators to check if the input date is greater than four years from the current date
-def datediff_in_years(date1, date2):
-    return abs(date1.year - date2.year)
-
-
-def competition_to_text(competition_value):
-    if competition_value == 0:
-        return "Unspecified"
-    elif competition_value == 1:
-        return "Unknown"
-    elif competition_value == 2:
-        return "Low"
-    elif competition_value == 3:
-        return "Medium"
-    elif competition_value == 4:
-        return "High"
-    else:
-        return "Unknown"
-
-
-def micros_to_currency(micros):
-    return micros / 1_000_000
 
 
 # Function to log better the exponential backoff retry
@@ -658,17 +635,3 @@ def format_timestamp(timestamp):
     minutes, seconds = divmod(seconds, 60)
     microseconds = delta.microseconds
     return f"{int(days):02}:{int(hours):02}:{int(minutes):02}:{int(seconds):02}.{microseconds:06}"
-
-
-def convert_missing_to_zero(data):
-    # Convert missing values to 0
-    for col in data:
-        if isinstance(data[col][0], list):  # Check if the column contains arrays
-            data[col] = [
-                [0 if pd.isnull(item) else item for item in val] for val in data[col]
-            ]
-        else:
-            data[col] = [0 if pd.isnull(val) else val for val in data[col]]
-
-    df = pd.DataFrame(data)
-    return df
