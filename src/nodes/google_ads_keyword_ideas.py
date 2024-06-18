@@ -75,7 +75,10 @@ from dateutil.relativedelta import relativedelta
 from google.ads.googleads.errors import GoogleAdsException
 
 import util.keyword_ideas_utils as keyword_ideas_utils
-from util.utils import check_column
+from util.utils import (
+    check_column,
+    pick_default_column,
+)
 
 
 LOGGER = logging.getLogger(__name__)
@@ -260,12 +263,7 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
             )
 
         if self.locations_column:
-            check_column(
-                location_table_schema,
-                self.locations_column,
-                knext.int64(),
-                "locations",
-            )
+            pick_default_column(location_table_schema, knext.long())
 
         return None, None
 
@@ -346,6 +344,7 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
                 self.include_average_cpc,
                 self.keyword_ideas_mode,
                 exec_context,
+                self.rows_per_chunk,
             )
         )
         return knext.Table.from_pandas(

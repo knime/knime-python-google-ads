@@ -78,3 +78,20 @@ def check_column(
         raise knext.InvalidParametersError(
             f"The {column_purpose} column '{column_name}' is of type {str(ktype)} but should be of type {str(expected_type)}. If you want to use the column '{column_name}' as {column_purpose} column, please change the column type to {str(expected_type)}. Tip: Use the String Manipulation node to convert the column type."
         )
+
+
+# TODO: Pick by default a column of type Long
+def pick_default_column(input_table: knext.Schema, ktype: knext.KnimeType) -> str:
+    default_column = pick_default_columns(input_table, ktype, 1)[0]
+    return default_column
+
+
+def pick_default_columns(
+    input_table: knext.Schema, ktype: knext.KnimeType, n_columns: int
+) -> List[str]:
+    columns = [c for c in input_table if c.ktype == ktype]
+
+    if len(columns) < n_columns:
+        raise knext.InvalidParametersError(
+            f"The input table does not contain enough ({n_columns}) distinct columns of type '{str(ktype)}'. Found: {len(columns)}"
+        )

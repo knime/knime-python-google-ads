@@ -249,8 +249,9 @@ def generate_keywords_ideas_with_chunks(
     include_average_cpc,
     keyword_ideas_mode,
     exec_context,
+    rows_per_chunk,
 ):
-    location_chunks = chunked(location_rns, self.rows_per_chunk)
+    location_chunks = chunked(location_rns, rows_per_chunk)
     LOGGER.warning(f"Location chunks: {location_chunks}")
     all_keyword_ideas = []
     iteration_ids = []
@@ -260,6 +261,12 @@ def generate_keywords_ideas_with_chunks(
     # Clear the request timestamps for a new batch of requests
     request_timestamps.clear()
     LOGGER.warning(f"Request timestamps cleared: {request_timestamps}")
+
+    # Process data in smaller batches to avoid memory issues
+    batch_size = 80000  # Adjust this size as needed
+
+    aggregated_data = []
+    aggregated_monthly_volumes = []
 
     for iteration_id, chunk in enumerate(location_chunks, start=1):
         # cancel the execution if the user cancels the execution
@@ -274,11 +281,14 @@ def generate_keywords_ideas_with_chunks(
                 # Check for missing values in keyword_texts
                 if any(url is None or pd.isna(url) for url in keyword_texts):
                     raise knext.InvalidParametersError(
-                        "One or more URLs from the provided input table are missing values. The Google Ads API does not allow this. Tip: To handle missing values, add a Missing Value step upstream."
+                        "One or more URLs from the provided input table are missing values. The Google Ads API does not allow this. Tip: To handle missing values, add a Missing Value node upstream."
                     )
 
                 for url in keyword_texts:
                     # Create a new request object for each URL
+                    # cancel the execution if the user cancels the execution
+                    check_canceled(exec_context)
+
                     request: GenerateKeywordIdeasRequest
                     request = client.get_type("GenerateKeywordIdeasRequest")
                     request.customer_id = account_id
@@ -324,12 +334,15 @@ def generate_keywords_ideas_with_chunks(
                 # Check for missing values in keyword_texts
                 if any(kw is None or pd.isna(kw) for kw in keyword_texts):
                     raise knext.InvalidParametersError(
-                        "One or more keywords from the provided input table are missing values. The Google Ads API does not allow this. Tip: To handle missing values, add a Missing Value step upstream."
+                        "One or more keywords from the provided input table are missing values. The Google Ads API does not allow this. Tip: To handle missing values, add a Missing Value node upstream."
                     )
 
                 # Split keyword_texts into chunks of 20 keywords each
                 for i in range(0, len(keyword_texts), 20):
                     chunked_keywords = keyword_texts[i : i + 20]
+
+                    # cancel the execution if the user cancels the execution
+                    check_canceled(exec_context)
                     # Create a single request for all keyword texts
                     request = client.get_type("GenerateKeywordIdeasRequest")
                     request.customer_id = account_id
@@ -376,15 +389,42 @@ def generate_keywords_ideas_with_chunks(
         keyword_ideas_pager = exponential_backoff_retry(
             lambda c=chunk: request_keyword_ideas(c)
         )
-        LOGGER.warning(f"Keyword ideas pager: {keyword_ideas_pager}")
+        # LOGGER.warning(f"Keyword ideas pager: {keyword_ideas_pager}") is creating a lot of logs
         LOGGER.warning(f"Iteration ID: {iteration_id}")
 
         keyword_ideas = list(keyword_ideas_pager)
         all_keyword_ideas.extend(keyword_ideas)
+        LOGGER.warning(f"len(all_keyword_ideas): {len(all_keyword_ideas)}")
         iteration_ids.extend([iteration_id] * len(keyword_ideas))
         # Append the location IDs (list) used on each iteration
         location_ids.extend([chunk] * len(keyword_ideas))
-        LOGGER.warning(f"Location IDs: {location_ids}")
+        # LOGGER.warning(f"Location IDs: {location_ids}") is creating a lot of logs
+
+        # Process the batch if it reaches the batch size
+        if len(all_keyword_ideas) >= batch_size:
+            df_batch, df_monthly_batch = process_batch(
+                all_keyword_ideas, iteration_ids, location_ids, include_average_cpc
+            )
+            aggregated_data.append(df_batch)
+            aggregated_monthly_volumes.append(df_monthly_batch)
+            all_keyword_ideas = []
+            iteration_ids = []
+            location_ids = []
+    # Process any remaining keyword ideas
+    if all_keyword_ideas:
+        df_batch, df_monthly_batch = process_batch(
+            all_keyword_ideas, iteration_ids, location_ids, include_average_cpc
+        )
+        aggregated_data.append(df_batch)
+        aggregated_monthly_volumes.append(df_monthly_batch)
+
+    df_keyword_ideas_aggregated = pd.concat(aggregated_data, ignore_index=True)
+    df_monthly_search_volumes = pd.concat(aggregated_monthly_volumes, ignore_index=True)
+
+    return df_keyword_ideas_aggregated, df_monthly_search_volumes
+
+
+def process_batch(all_keyword_ideas, iteration_ids, location_ids, include_average_cpc):
 
     # Create empty lists to store data
     keywords_ideas = []
@@ -500,12 +540,13 @@ def generate_keywords_ideas_with_chunks(
 
 
 # Function to log better the exponential backoff retry
-def format_timestamp(timestamp):
-    # Calculate the time difference from the current time
-    delta = timedelta(seconds=(time.time() - timestamp))
-    days, seconds = divmod(delta.total_seconds(), 86400)  # 86400 seconds in a day
-    hours, seconds = divmod(seconds, 3600)  # 3600 seconds in an hour
-    minutes, seconds = divmod(seconds, 60)
+
+
+def format_timestamp(seconds):
+    delta = timedelta(seconds=seconds)
+    days = delta.days
+    hours, remainder = divmod(delta.seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
     microseconds = delta.microseconds
     return f"{int(days):02}:{int(hours):02}:{int(minutes):02}:{int(seconds):02}.{microseconds:06}"
 
