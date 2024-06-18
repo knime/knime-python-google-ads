@@ -6,7 +6,10 @@ import pandas as pd
 from collections import deque
 import time
 import random
-from itertools import islice
+from itertools import (
+    islice,
+    tee,
+)
 import numpy as np
 from datetime import timedelta
 from google.ads.googleads.v16.errors.types.quota_error import QuotaErrorEnum
@@ -15,6 +18,7 @@ from google.ads.googleads.v16.services.types.keyword_plan_idea_service import (
     GenerateKeywordIdeasRequest,
 )
 from util.utils import check_canceled
+import math
 
 
 LOGGER = logging.getLogger(__name__)
@@ -251,8 +255,11 @@ def generate_keywords_ideas_with_chunks(
     exec_context,
     rows_per_chunk,
 ):
-    location_chunks = chunked(location_rns, rows_per_chunk)
+    total_chunks = math.ceil(len(location_rns) / rows_per_chunk)
+
+    location_chunks = chunked(location_rns, rows_per_chunk)  # Keep this as an iterator
     LOGGER.warning(f"Location chunks: {location_chunks}")
+
     all_keyword_ideas = []
     iteration_ids = []
     # Create empty lists to store list of location IDs used on each iteration
@@ -399,6 +406,16 @@ def generate_keywords_ideas_with_chunks(
         # Append the location IDs (list) used on each iteration
         location_ids.extend([chunk] * len(keyword_ideas))
         # LOGGER.warning(f"Location IDs: {location_ids}") is creating a lot of logs
+
+        # Update the progress bar
+        progress = iteration_id / total_chunks
+        LOGGER.warning(
+            f"Progress: {progress:.2%} - Processed {len(all_keyword_ideas)} keyword ideas"
+        )
+        exec_context.set_progress(
+            progress,
+            f"Processed {len(all_keyword_ideas)} keyword ideas. Additional ideas are on the way \U0001F4A1; this process takes some time. Please be patient.",
+        )
 
         # Process the batch if it reaches the batch size
         if len(all_keyword_ideas) >= batch_size:

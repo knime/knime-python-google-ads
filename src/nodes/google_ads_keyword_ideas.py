@@ -263,7 +263,9 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
             )
 
         if self.locations_column:
-            pick_default_column(location_table_schema, knext.long())
+            check_column(
+                location_table_schema, self.locations_column, knext.int64(), "locations"
+            )
 
         return None, None
 
@@ -347,6 +349,7 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
                 self.rows_per_chunk,
             )
         )
+
         return knext.Table.from_pandas(
             df_keyword_ideas_aggregated
         ), knext.Table.from_pandas(df_monthly_search_volumes)
