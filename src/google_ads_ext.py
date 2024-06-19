@@ -56,8 +56,4 @@ main_category = knext.category(
 import nodes.google_ads_connector
 import nodes.google_ads_query
 import nodes.google_ads_keyword_ideas
-<<<<<<< Upstream, based on origin/master
-
-=======
 import nodes.google_ads_geo_targets
->>>>>>> 336a3b1 AP-22104 Finished Language and Location configuraion Kwd Ideas. Created Geo Targets node.
