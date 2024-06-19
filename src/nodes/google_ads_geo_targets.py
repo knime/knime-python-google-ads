@@ -73,10 +73,18 @@ LOGGER = logging.getLogger(__name__)
 
 
 @knext.node(
-    name="Google Ads Geo Targets",
+    name="Google Ads Geo Targets (Labs)",
     node_type=knext.NodeType.SOURCE,
     icon_path="icons/google_ads_geo_targets_logo.png",
     category=google_ads_ext.main_category,
+    keywords=[
+        "Google",
+        "Google Ads",
+        "Ads",
+        "Geo Targeting",
+        "Location Targeting",
+        "Ads Geo Data",
+    ],
 )
 @knext.input_port(
     "Google Client",
@@ -85,6 +93,36 @@ LOGGER = logging.getLogger(__name__)
 )
 @knext.output_table(name="Output Data", description="KNIME table with query results")
 class GoogleAdsGeoTargets:
+    """
+
+    This node was designed as a support node for the Google Ads Query and Keyword Ideas nodes. It allows the user to output the geo target locations available for Google Ads.
+    To know more about [location targeting](https://support.google.com/google-ads/answer/1722043?hl=en) in Google Ads, please visit the official documentation.
+
+    **Configuration and Usage**
+
+    1. **Selecting Geo Target Locations**
+
+    - You select one country to output the geo target information for each node instance. If you need more countries, drag and drop additional Geo Targets nodes or use loops over the node.
+    - Once the user has selected the country, you can apply the target filter, specifying the type of geo target location you want.
+
+    2. **Examples**
+
+    - **Example One**: List _all_ the geo target locations of a country, and then use the native KNIME Analytics Platform ETL nodes to filter and manipulate them.
+    - **Example Two**: Target a specific level of the geo target hierarchy. For example, selecting the state level in the US will output only the states (e.g., California, Texas, New York, Florida, Illinois).
+    - **Example Three**: To reach the entire audience of a country, you can select the country and as target _country_ to output only the country.
+
+    **Advanced Settings**
+
+    - Similar to the Google Ads Query node, by **unhiding** the advanced settings, you can increase the timeout if the node is failing due to this reason.
+
+    **Mandatory Upstream Node**
+
+    - You need to connect to the Google Ads Connector node to be able to execute the queries.
+
+    **Output**
+
+    - Outputs the geo target locations for further processing or analysis in KNIME Analytics Platform. You can combine this output with other KNIME extension, such as the [Geospatial Analytics Extension](https://hub.knime.com/center%20for%20geographic%20analysis%20at%20harvard%20university/extensions/sdl.harvard.features.geospatial/latest/).
+    """
 
     country_selection = knext.EnumParameter(
         label="Country Selection",

@@ -51,15 +51,15 @@ from google.oauth2.service_account import Credentials as Credentials_service
 
 import google_ads_ext
 from google.ads.googleads.client import GoogleAdsClient
-from google.ads.googleads.v15.services.services.google_ads_service.client import (
+from google.ads.googleads.v16.services.services.google_ads_service.client import (
     GoogleAdsServiceClient,
 )
 import pandas as pd
-from google.ads.googleads.v15.services.types.google_ads_service import GoogleAdsRow
-from google.ads.googleads.v15.services.services.customer_service.client import (
+from google.ads.googleads.v16.services.types.google_ads_service import GoogleAdsRow
+from google.ads.googleads.v16.services.services.customer_service.client import (
     CustomerServiceClient,
 )
-from google.ads.googleads.v15.services.types.customer_service import (
+from google.ads.googleads.v16.services.types.customer_service import (
     ListAccessibleCustomersResponse,
 )
 from util.common import (
@@ -77,6 +77,14 @@ LOGGER = logging.getLogger(__name__)
     node_type=knext.NodeType.MANIPULATOR,
     icon_path="icons\google_ads_connector_logo.png",
     category=google_ads_ext.main_category,
+    keywords=[
+        "Google",
+        "Google Ads",
+        "Ads",
+        "Google Authenticator",
+        "Ads Authentication",
+        "Google API Auth",
+    ],
 )
 @knext.input_port(
     name="Credentials",
@@ -89,10 +97,25 @@ LOGGER = logging.getLogger(__name__)
     google_ad_port_type,
 )
 class GoogleAdsConnector:
-    """Takes credentials and adds the customer ID so downstream nodes can access the Google Ads API.
+    """
 
-    Long description of the node.
-    Can be multiple lines.
+    This node connects with the Google Ads API, enabling interaction with Google Ads services.
+
+    ### **Configuration and Usage**
+
+    **Mandatory Upstream Node**: The Google Authenticator node is required upstream. Ensure you provide the scope `https://www.googleapis.com/auth/adwords` there if it is not listed.
+
+    ### **User Requirements**
+
+    1. **Developer Token**: Available in the API Center section under Tools & Settings.
+    2. **Manager Account ID**: Found in the top right corner of the Google Ads dashboard when logged in as a manager.
+    3. **Account ID**: Displayed in the account overview section.
+
+    ### **Account Requirements**
+
+    1. A Google Ads account with a Manager account is necessary to use this connector.
+    2. Request a developer token using the [Google Ads API](https://developers.google.com/google-ads/api/docs/get-started/dev-token) link.
+
     """
 
     developer_token = knext.StringParameter(

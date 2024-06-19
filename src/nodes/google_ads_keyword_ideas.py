@@ -89,6 +89,14 @@ LOGGER = logging.getLogger(__name__)
     node_type=knext.NodeType.MANIPULATOR,
     icon_path="icons/google_ads_keyword_ideas_logo.png",
     category=google_ads_ext.main_category,
+    keywords=[
+        "Google",
+        "Google Ads",
+        "Ads",
+        "Keyword Ideas",
+        "Keyword Research",
+        "Ads Keyword Metrics",
+    ],
 )
 @knext.input_port(
     "Google Client",
@@ -112,6 +120,43 @@ LOGGER = logging.getLogger(__name__)
     description="KNIME table with keyword ideas and the monthly search volumes to check trends and seasonality. The data is aggregated by month for the selected period (default is 12 months).",
 )
 class GoogleAdsKwdIdeas(knext.PythonNode):
+    """
+
+    This node generates **keyword ideas** from a list of _keywords_ or _webpage URLs_ and returns the **aggregated data** such as the average monthly searches, competition, average CPC, and seasonality.
+    The node also returns the **historical monthly search volumes** to check _trends and seasonality_. The data is aggregated by month for the selected period (default is 12 months).
+    For an overview of the Keyword Ideas service, see the [Google Ads API support page](https://support.google.com/google-ads/answer/6325025?sjid=12334900779237463092-EU).
+
+    **Configuration and Usage**
+
+    **General Settings**:
+
+    - Specify the **language** and **location** that users are using to perform Google searches to determine the results of _keyword idea metrics_. For instance, if you select English as the language and Alaska, US as the location, and your keyword is in Spanish, such as "playa," the search volume of the generated ideas will be low.
+
+    **Mandatory Upstream Nodes**
+
+    1. **Google Ads Connector**: A connection to the Google Ads Connector node is required.
+    2. **Seed Data**: A KNIME table with the seed column "keywords" or "Webpages URLs".
+    3. **Geo Target Locations**: Another table with the geo target location ID. The _Google Ads Geo Targets_ node can be used to input a column with the IDs.
+
+    **Node Processing Logic**
+
+    - **Cost and Complexity**: Due to cost and complexity, the Planning service methods are subject to separate limits from other types of requests. See the link: [Google Ads API Quotas](https://developers.google.com/google-ads/api/docs/best-practices/quotas#planning_services).
+    - **Processing Chunks**: For the above reason, the node processes **keywords in chunks of 20** and **locations in chunks of 1** by default. The location chunks settings can be modified by unhiding the advanced settings (max 10 chunks).
+    - **Output Columns**: The output includes **two additional columns** with the iteration ID and the location for which the keyword ideas were generated and their metrics.
+    - **Processing Time**: Due to the chunks and API limit, large datasets might take a significant amount of time to be processed.
+
+    **Advanced Settings**
+
+    - Retrieve data up to 4 years.
+    - Option to include average CPC.
+    - Option to include adult keywords in the results.
+
+    **Output**
+
+    1. **Keyword Ideas with Aggregated Metrics**: Provides the keyword ideas with aggregated metrics for the selected chunks of location and in the determined language.
+    2. **Keyword Ideas with Historical Metrics**: Provides the keyword ideas with historical metrics for the selected chunks of locations. You can use downstream KNIME components to analyze seasonality, for example: [KNIME Seasonality Analysis](https://hub.knime.com/-/spaces/-/~YStBnJ-9lhpx4txe/current-state/).
+
+    """
 
     keyword_ideas_mode = knext.EnumParameter(
         label="Keyword Ideas Input Mode",
@@ -158,7 +203,7 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
     # Here is the website with the reference for the managing the dates in the Google Ads API: https://developers.google.com/google-ads/api/reference/rpc/v16/HistoricalMetricsOptions
     date_start = knext.DateTimeParameter(
         label="Start date",
-        description="Define the start date for the historical metrics.",
+        description="Define the start date for the keywords historical metrics. The default is 13 months ago from the current date. The maximum date range is 4 years.",
         is_advanced=True,
         show_date=True,
         show_time=False,
@@ -189,7 +234,7 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
 
     date_end = knext.DateTimeParameter(
         label="End date",
-        description="Define the end date for the historical metrics.",
+        description="Define the end date for the keywords historical metrics.",
         is_advanced=True,
         show_date=True,
         show_time=False,

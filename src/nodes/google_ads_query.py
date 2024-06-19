@@ -53,12 +53,12 @@ from util.common import (
     google_ad_port_type,
 )
 import util.pre_built_ad_queries as pb_queries
-from google.ads.googleads.v15.services.services.google_ads_service.client import (
+from google.ads.googleads.v16.services.services.google_ads_service.client import (
     GoogleAdsServiceClient,
 )
 from google.ads.googleads.errors import GoogleAdsException
 
-from google.ads.googleads.v15.services.types.google_ads_service import GoogleAdsRow
+from google.ads.googleads.v16.services.types.google_ads_service import GoogleAdsRow
 from google.protobuf.internal.containers import RepeatedScalarFieldContainer
 from google.protobuf.pyext import _message
 import util.utils as utils
@@ -83,6 +83,14 @@ class QueryBuilderMode(knext.EnumParameterOptions):
     node_type=knext.NodeType.MANIPULATOR,
     icon_path="icons/google_ads_query_logo.png",
     category=google_ads_ext.main_category,
+    keywords=[
+        "Google",
+        "Google Ads",
+        "Ads",
+        "Ads Query",
+        "Ads Data Fetch",
+        "Keyword Reports",
+    ],
 )
 @knext.input_port(
     "Google Client",
@@ -91,10 +99,36 @@ class QueryBuilderMode(knext.EnumParameterOptions):
 )
 @knext.output_table(name="Output Data", description="KNIME table with query results")
 class GoogleAdsQuery:
-    """Fetch data from Google Adwords for a given query.
+    """
 
-    Long description of the node.
-    Can be multiple lines.
+    The Google Ads Query node allows the user to fetch data from their Google Ads account to build reports, analyze, and share highlights.
+
+    **Configuration and Usage**
+
+    There are two modes to interact with the node: pre-built and custom queries.
+
+    1. **Pre-built Queries**
+
+        - These queries mirror the reports in the Google Ads dashboard, allowing you to quickly import your data into the KNIME Analytics Platform.
+        - For example, the _Search Terms_ report can be fine-tuned for different time ranges.
+
+    2. **Custom Queries**
+
+        - If you are comfortable with SQL, you can use the custom mode to leverage the Google Ads Query Language (GAQL) to fetch your data.
+        - This mode is versatile and gives greater control over the data you retrieve. For more information, refer to the [Google Ads Query Language Guide](https://developers.google.com/google-ads/api/docs/query/overview).
+        - Additionally, you can validate your queries to ensure they are correct. Refer to the [Query Validation Guide](https://developers.google.com/google-ads/api/fields/v16/query_validator).
+
+    **Advanced Settings**
+
+    - You can increase the timeout for large queries by **unhiding** the advanced settings and adjusting the timeout value accordingly.
+
+    **Mandatory Upstream Node**
+
+    - You need to connect to the Google Ads Connector node to execute the queries.
+
+    **Output**
+
+    - *The output port outputs the fetched data for further processing or analysis in KNIME Analytics Platform.
     """
 
     query_mode = knext.EnumParameter(
