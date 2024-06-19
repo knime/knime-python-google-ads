@@ -14,6 +14,7 @@ import numpy as np
 from datetime import timedelta
 from google.ads.googleads.v16.errors.types.quota_error import QuotaErrorEnum
 from google.ads.googleads.errors import GoogleAdsException
+from google.api_core.exceptions import ResourceExhausted
 from google.ads.googleads.v16.services.types.keyword_plan_idea_service import (
     GenerateKeywordIdeasRequest,
 )
@@ -146,7 +147,9 @@ request_timestamps = deque(maxlen=60)
 # Quota reference website: https://developers.google.com/google-ads/api/docs/best-practices/quotas#planning_services
 
 
-def exponential_backoff_retry(func, max_attempts=5, initial_delay=5):
+def exponential_backoff_retry(
+    func, max_attempts=5, initial_delay=2, max_delay=60, chunk_info=None
+):
     delay = initial_delay
     LOGGER.warning(f"Initial delay: {delay}")
 
@@ -176,41 +179,38 @@ def exponential_backoff_retry(func, max_attempts=5, initial_delay=5):
             LOGGER.warning(f"Length of request timestamps: {len(request_timestamps)}")
             return result
 
-        except GoogleAdsException as ex:
-            error_code = ex.failure.errors[0].error_code
-            LOGGER.warning(f"Error code: {error_code.quota_error}")
-            if (
-                error_code.quota_error == QuotaErrorEnum.QuotaError.RESOURCE_EXHAUSTED
-                or ex.error.code() == 8  # StatusCode.RESOURCE_EXHAUSTED
-            ):
-                if attempt < max_attempts - 1:
-                    LOGGER.warning(
-                        f"Attempt {attempt+1} failed due to RESOURCE_EXHAUSTED. Retrying in {delay} seconds..."
-                    )
-                    time.sleep(delay)
-                    delay *= 2  # Exponential backoff
-                    delay += random.uniform(
-                        0, delay
-                    )  # Add jitter to avoid thundering herd problem
-                else:
-                    max_attemps_error_mssg = (
-                        "Max attempts reached, raising the exception."
-                    )
-                    raise knext.InvalidParametersError(max_attemps_error_mssg)
-            else:
-                status_error = ex.error.code().name
-                error_messages = ""
-                for error in ex.failure.errors:
-                    error_messages = " ".join([error.message])
-                error_first_part = " ".join(
-                    [
-                        "Failed with status",
-                        status_error,
-                    ]
+        # Catch the RESOURCE_EXHAUSTED error and retry the request
+        except ResourceExhausted as ex:
+            LOGGER.warning(
+                f"ResourceExhausted exception caught for chunk {chunk_info}: {ex}"
+            )
+            LOGGER.warning(f"ResourceExhausted exception caught: {ex}")
+            if attempt < max_attempts - 1:
+                LOGGER.warning(
+                    f"Attempt {attempt+1} failed due to RESOURCE_EXHAUSTED. Retrying in {delay} seconds..."
                 )
-                error_second_part = " ".join([error_messages])
-                error_to_raise = ". ".join([error_first_part, error_second_part])
-                raise knext.InvalidParametersError(error_to_raise)
+                time.sleep(delay)
+                delay = min(delay * 2, max_delay)
+                delay += random.uniform(
+                    0, delay
+                )  # Add jitter to avoid thundering herd problem
+            else:
+                max_attempts_error_msg = "Max attempts reached, raising the exception."
+                raise knext.InvalidParametersError(max_attempts_error_msg)
+        # Catch generics google ads exceptions
+        except GoogleAdsException as ex:
+            LOGGER.warning(f"GoogleAdsException caught: {ex}")
+            for error in ex.failure.errors:
+                LOGGER.warning(f"Error code: {error.error_code}")
+                LOGGER.warning(f"Error message: {error.message}")
+            status_error = ex.error.code().name
+            error_messages = " ".join([error.message for error in ex.failure.errors])
+            error_to_raise = f"Failed with status {status_error}. {error_messages}"
+            raise knext.InvalidParametersError(error_to_raise)
+        # Log any other exceptions and raise them
+        except Exception as e:
+            LOGGER.error(f"An unexpected error occurred: {e}", exc_info=True)
+            raise
 
 
 # Define a function to chunk the location
@@ -257,6 +257,8 @@ def generate_keywords_ideas_with_chunks(
 ):
     total_chunks = math.ceil(len(location_rns) / rows_per_chunk)
 
+    LOGGER.warning(f"Total chunks: {total_chunks}")
+
     location_chunks = chunked(location_rns, rows_per_chunk)  # Keep this as an iterator
     LOGGER.warning(f"Location chunks: {location_chunks}")
 
@@ -279,154 +281,163 @@ def generate_keywords_ideas_with_chunks(
         # cancel the execution if the user cancels the execution
         check_canceled(exec_context)
 
-        def request_keyword_ideas(chunk):
-            # [Preparing the request]
-            # Only one of the fields "url_seed", "keyword_seed" can be set on the request, depending on whether
-            # keywords, a page_url were passed to this function.
-            if keyword_ideas_mode == "URL":
+        if keyword_ideas_mode == "URL":
 
-                # Check for missing values in keyword_texts
-                if any(url is None or pd.isna(url) for url in keyword_texts):
-                    raise knext.InvalidParametersError(
-                        "One or more URLs from the provided input table are missing values. The Google Ads API does not allow this. Tip: To handle missing values, add a Missing Value node upstream."
-                    )
+            def request_keyword_ideas(chunk, url):
+                keyword_ideas = []
+                check_canceled(exec_context)
+                request = client.get_type("GenerateKeywordIdeasRequest")
+                request.customer_id = account_id
+                request.language = language_rn
+                request.geo_target_constants.extend(chunk)
+                request.keyword_plan_network = keyword_plan_network
+                request.include_adult_keywords = include_adult_keywords
+                historical_metrics_options = client.get_type("HistoricalMetricsOptions")
+                year_month_range = historical_metrics_options.year_month_range
+                year_month_range.start.year = date_start.year
+                year_month_range.start.month = date_start.month + 1
+                year_month_range.end.year = date_end.year
+                year_month_range.end.month = date_end.month + 1
+                request.historical_metrics_options.CopyFrom(historical_metrics_options)
+                request.historical_metrics_options.include_average_cpc = (
+                    include_average_cpc
+                )
+                request.url_seed.url = url
+                keyword_ideas_pager = keyword_plan_idea_service.generate_keyword_ideas(
+                    request=request
+                )
+                keyword_ideas.extend(list(keyword_ideas_pager))
+                return keyword_ideas
 
-                for url in keyword_texts:
-                    # Create a new request object for each URL
-                    # cancel the execution if the user cancels the execution
-                    check_canceled(exec_context)
-
-                    request: GenerateKeywordIdeasRequest
-                    request = client.get_type("GenerateKeywordIdeasRequest")
-                    request.customer_id = account_id
-                    request.language = language_rn
-                    request.geo_target_constants.extend(chunk)
-                    request.keyword_plan_network = keyword_plan_network
-                    request.include_adult_keywords = include_adult_keywords
-
-                    # Properly create and set the year_month_range within historical_metrics_options
-                    historical_metrics_options = client.get_type(
-                        "HistoricalMetricsOptions"
-                    )
-                    year_month_range = historical_metrics_options.year_month_range
-
-                    year_month_range.start.year = date_start.year
-                    # The month is 1-based, so we need to add 1 to the month to get the correct value.
-                    year_month_range.start.month = date_start.month + 1
-                    year_month_range.end.year = date_end.year
-                    year_month_range.end.month = date_end.month + 1
-
-                    request.historical_metrics_options.CopyFrom(
-                        historical_metrics_options
-                    )
-                    request.historical_metrics_options.include_average_cpc = (
-                        include_average_cpc
-                    )
-
-                    # Set the URL seed for this specific URL
-                    request.url_seed.url = url
-
-                    # Generate keyword ideas for the current URL
-                    keyword_ideas_pager = (
-                        keyword_plan_idea_service.generate_keyword_ideas(
-                            request=request
-                        )
-                    )
-
-                    # Collect keyword ideas into the result list
-                    keyword_ideas = list(keyword_ideas_pager)
-                    all_keyword_ideas.extend(keyword_ideas)
-
-            elif keyword_ideas_mode == "KEYWORDS":
-                # Check for missing values in keyword_texts
-                if any(kw is None or pd.isna(kw) for kw in keyword_texts):
-                    raise knext.InvalidParametersError(
-                        "One or more keywords from the provided input table are missing values. The Google Ads API does not allow this. Tip: To handle missing values, add a Missing Value node upstream."
-                    )
-
-                # Split keyword_texts into chunks of 20 keywords each
-                for i in range(0, len(keyword_texts), 20):
-                    chunked_keywords = keyword_texts[i : i + 20]
-
-                    # cancel the execution if the user cancels the execution
-                    check_canceled(exec_context)
-                    # Create a single request for all keyword texts
-                    request = client.get_type("GenerateKeywordIdeasRequest")
-                    request.customer_id = account_id
-                    request.language = language_rn
-                    request.geo_target_constants.extend(chunk)
-                    request.keyword_plan_network = keyword_plan_network
-                    request.include_adult_keywords = include_adult_keywords
-
-                    # Properly create and set the year_month_range within historical_metrics_options
-                    historical_metrics_options = client.get_type(
-                        "HistoricalMetricsOptions"
-                    )
-                    year_month_range = historical_metrics_options.year_month_range
-                    year_month_range.start.year = date_start.year
-                    year_month_range.start.month = date_start.month + 1
-                    year_month_range.end.year = date_end.year
-                    year_month_range.end.month = date_end.month + 1
-                    request.historical_metrics_options.CopyFrom(
-                        historical_metrics_options
-                    )
-                    request.historical_metrics_options.include_average_cpc = (
-                        include_average_cpc
-                    )
-
-                    # Set the keyword seed with all provided keywords
-                    request.keyword_seed.keywords.extend(chunked_keywords)
-
-                    # Generate keyword ideas for the list of keywords
-                    keyword_ideas_pager = (
-                        keyword_plan_idea_service.generate_keyword_ideas(
-                            request=request
-                        )
-                    )
-
-                    # Collect keyword ideas into the result list
-                    keyword_ideas = list(keyword_ideas_pager)
-                    all_keyword_ideas.extend(keyword_ideas)
-
-            return all_keyword_ideas
-
-        LOGGER.warning(f"Chunk: {chunk}")
-
-        # Make the request with retry logic
-        keyword_ideas_pager = exponential_backoff_retry(
-            lambda c=chunk: request_keyword_ideas(c)
-        )
-        # LOGGER.warning(f"Keyword ideas pager: {keyword_ideas_pager}") is creating a lot of logs
-        LOGGER.warning(f"Iteration ID: {iteration_id}")
-
-        keyword_ideas = list(keyword_ideas_pager)
-        all_keyword_ideas.extend(keyword_ideas)
-        LOGGER.warning(f"len(all_keyword_ideas): {len(all_keyword_ideas)}")
-        iteration_ids.extend([iteration_id] * len(keyword_ideas))
-        # Append the location IDs (list) used on each iteration
-        location_ids.extend([chunk] * len(keyword_ideas))
-        # LOGGER.warning(f"Location IDs: {location_ids}") is creating a lot of logs
-
-        # Update the progress bar
-        progress = iteration_id / total_chunks
-        LOGGER.warning(
-            f"Progress: {progress:.2%} - Processed {len(all_keyword_ideas)} keyword ideas"
-        )
-        exec_context.set_progress(
-            progress,
-            f"Processed {len(all_keyword_ideas)} keyword ideas. Additional ideas are on the way \U0001F4A1; this process takes some time. Please be patient.",
-        )
-
-        # Process the batch if it reaches the batch size
-        if len(all_keyword_ideas) >= batch_size:
-            df_batch, df_monthly_batch = process_batch(
-                all_keyword_ideas, iteration_ids, location_ids, include_average_cpc
+            LOGGER.warning(
+                f"Processing chunk {iteration_id} of {total_chunks}: {chunk}"
             )
-            aggregated_data.append(df_batch)
-            aggregated_monthly_volumes.append(df_monthly_batch)
-            all_keyword_ideas = []
-            iteration_ids = []
-            location_ids = []
+
+            # Process each URL
+            for url in keyword_texts:
+                LOGGER.warning(f"Processing URL: {url}")
+
+                # Pass chunk information and URL to the retry function
+                keyword_ideas_pager = exponential_backoff_retry(
+                    lambda c=chunk, u=url: request_keyword_ideas(c, u),
+                    chunk_info=f"{chunk}-{url}",
+                )
+
+                LOGGER.warning(f"Iteration ID: {iteration_id}")
+
+                keyword_ideas = list(keyword_ideas_pager)
+                all_keyword_ideas.extend(keyword_ideas)
+                LOGGER.warning(f"len(all_keyword_ideas): {len(all_keyword_ideas)}")
+                iteration_ids.extend([iteration_id] * len(keyword_ideas))
+                location_ids.extend([chunk] * len(keyword_ideas))
+
+                # Update the progress bar
+                progress = iteration_id / total_chunks
+                LOGGER.warning(
+                    f"Progress: {progress:.2%} - Processed {len(all_keyword_ideas)} keyword ideas"
+                )
+                exec_context.set_progress(
+                    progress,
+                    f"We have generated  {len(all_keyword_ideas)} keyword ideas so far. More ideas \U0001F4A1 are on the way!. This process may take some time, so please be pacient.",
+                )
+
+                if len(all_keyword_ideas) >= batch_size:
+                    df_batch, df_monthly_batch = process_batch(
+                        all_keyword_ideas,
+                        iteration_ids,
+                        location_ids,
+                        include_average_cpc,
+                    )
+                    if not df_batch.empty:
+                        aggregated_data.append(df_batch)
+                    if not df_monthly_batch.empty:
+                        aggregated_monthly_volumes.append(df_monthly_batch)
+                    all_keyword_ideas = []
+                    iteration_ids = []
+                    location_ids = []
+
+                # Add a delay between URLs to reduce API rate limit issues
+                time.sleep(3)  # Increase the sleep time to 15 seconds
+
+        elif keyword_ideas_mode == "KEYWORDS":
+
+            def request_keyword_ideas(chunk, chunked_keywords):
+                keyword_ideas = []
+                check_canceled(exec_context)
+                request = client.get_type("GenerateKeywordIdeasRequest")
+                request.customer_id = account_id
+                request.language = language_rn
+                request.geo_target_constants.extend(chunk)
+                request.keyword_plan_network = keyword_plan_network
+                request.include_adult_keywords = include_adult_keywords
+                historical_metrics_options = client.get_type("HistoricalMetricsOptions")
+                year_month_range = historical_metrics_options.year_month_range
+                year_month_range.start.year = date_start.year
+                year_month_range.start.month = date_start.month + 1
+                year_month_range.end.year = date_end.year
+                year_month_range.end.month = date_end.month + 1
+                request.historical_metrics_options.CopyFrom(historical_metrics_options)
+                request.historical_metrics_options.include_average_cpc = (
+                    include_average_cpc
+                )
+                request.keyword_seed.keywords.extend(chunked_keywords)
+                keyword_ideas_pager = keyword_plan_idea_service.generate_keyword_ideas(
+                    request=request
+                )
+                keyword_ideas.extend(list(keyword_ideas_pager))
+                return keyword_ideas
+
+            LOGGER.warning(
+                f"Processing chunk {iteration_id} of {total_chunks}: {chunk}"
+            )
+
+            # Process each keyword chunk
+            for i in range(0, len(keyword_texts), 20):
+                chunked_keywords = keyword_texts[i : i + 20]
+                LOGGER.warning(f"Chunked keywords: {len(chunked_keywords)}")
+
+                # Pass chunk information and chunked keywords to the retry function
+                keyword_ideas_pager = exponential_backoff_retry(
+                    lambda c=chunk, ck=chunked_keywords: request_keyword_ideas(c, ck),
+                    chunk_info=f"{chunk}-{i}",
+                )
+
+                LOGGER.warning(f"Iteration ID: {iteration_id}")
+
+                keyword_ideas = list(keyword_ideas_pager)
+                all_keyword_ideas.extend(keyword_ideas)
+                LOGGER.warning(f"len(all_keyword_ideas): {len(all_keyword_ideas)}")
+                iteration_ids.extend([iteration_id] * len(keyword_ideas))
+                location_ids.extend([chunk] * len(keyword_ideas))
+
+                # Update the progress bar
+                progress = iteration_id / total_chunks
+                LOGGER.warning(
+                    f"Progress: {progress:.2%} - Processed {len(all_keyword_ideas)} keyword ideas"
+                )
+                exec_context.set_progress(
+                    progress,
+                    f"We have generated  {len(all_keyword_ideas)} keyword ideas so far. More ideas \U0001F4A1 are on the way!. This process may take some time, so please be pacient.",
+                )
+
+                if len(all_keyword_ideas) >= batch_size:
+                    df_batch, df_monthly_batch = process_batch(
+                        all_keyword_ideas,
+                        iteration_ids,
+                        location_ids,
+                        include_average_cpc,
+                    )
+                    if not df_batch.empty:
+                        aggregated_data.append(df_batch)
+                    if not df_monthly_batch.empty:
+                        aggregated_monthly_volumes.append(df_monthly_batch)
+                    all_keyword_ideas = []
+                    iteration_ids = []
+                    location_ids = []
+
+                # Add a delay between keyword chunks to reduce API rate limit issues
+                time.sleep(3)  # Increase the sleep time to 5 seconds
+
     # Process any remaining keyword ideas
     if all_keyword_ideas:
         df_batch, df_monthly_batch = process_batch(
