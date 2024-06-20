@@ -151,10 +151,8 @@ def exponential_backoff_retry(
     func, max_attempts=5, initial_delay=2, max_delay=60, chunk_info=None
 ):
     delay = initial_delay
-    LOGGER.warning(f"Initial delay: {delay}")
 
     for attempt in range(max_attempts):
-        LOGGER.warning(f"Attempt {attempt+1} of {max_attempts}")
         try:
             # Rate limiting check
             if request_timestamps:
@@ -199,10 +197,10 @@ def exponential_backoff_retry(
                 raise knext.InvalidParametersError(max_attempts_error_msg)
         # Catch generics google ads exceptions
         except GoogleAdsException as ex:
-            LOGGER.warning(f"GoogleAdsException caught: {ex}")
+            LOGGER.error(f"GoogleAdsException caught: {ex}")
             for error in ex.failure.errors:
-                LOGGER.warning(f"Error code: {error.error_code}")
-                LOGGER.warning(f"Error message: {error.message}")
+                LOGGER.error(f"Error code: {error.error_code}")
+                LOGGER.error(f"Error message: {error.message}")
             status_error = ex.error.code().name
             error_messages = " ".join([error.message for error in ex.failure.errors])
             error_to_raise = f"Failed with status {status_error}. {error_messages}"
@@ -257,10 +255,7 @@ def generate_keywords_ideas_with_chunks(
 ):
     total_chunks = math.ceil(len(location_rns) / rows_per_chunk)
 
-    LOGGER.warning(f"Total chunks: {total_chunks}")
-
     location_chunks = chunked(location_rns, rows_per_chunk)  # Keep this as an iterator
-    LOGGER.warning(f"Location chunks: {location_chunks}")
 
     all_keyword_ideas = []
     iteration_ids = []
@@ -269,7 +264,6 @@ def generate_keywords_ideas_with_chunks(
 
     # Clear the request timestamps for a new batch of requests
     request_timestamps.clear()
-    LOGGER.warning(f"Request timestamps cleared: {request_timestamps}")
 
     # Process data in smaller batches to avoid memory issues
     batch_size = 80000  # Adjust this size as needed
@@ -309,13 +303,8 @@ def generate_keywords_ideas_with_chunks(
                 keyword_ideas.extend(list(keyword_ideas_pager))
                 return keyword_ideas
 
-            LOGGER.warning(
-                f"Processing chunk {iteration_id} of {total_chunks}: {chunk}"
-            )
-
             # Process each URL
             for url in keyword_texts:
-                LOGGER.warning(f"Processing URL: {url}")
 
                 # Pass chunk information and URL to the retry function
                 keyword_ideas_pager = exponential_backoff_retry(
@@ -323,19 +312,13 @@ def generate_keywords_ideas_with_chunks(
                     chunk_info=f"{chunk}-{url}",
                 )
 
-                LOGGER.warning(f"Iteration ID: {iteration_id}")
-
                 keyword_ideas = list(keyword_ideas_pager)
                 all_keyword_ideas.extend(keyword_ideas)
-                LOGGER.warning(f"len(all_keyword_ideas): {len(all_keyword_ideas)}")
                 iteration_ids.extend([iteration_id] * len(keyword_ideas))
                 location_ids.extend([chunk] * len(keyword_ideas))
 
                 # Update the progress bar
                 progress = iteration_id / total_chunks
-                LOGGER.warning(
-                    f"Progress: {progress:.2%} - Processed {len(all_keyword_ideas)} keyword ideas"
-                )
                 exec_context.set_progress(
                     progress,
                     f"We have generated  {len(all_keyword_ideas)} keyword ideas so far. More ideas \U0001F4A1 are on the way!. This process may take some time, so please be pacient.",
@@ -387,14 +370,9 @@ def generate_keywords_ideas_with_chunks(
                 keyword_ideas.extend(list(keyword_ideas_pager))
                 return keyword_ideas
 
-            LOGGER.warning(
-                f"Processing chunk {iteration_id} of {total_chunks}: {chunk}"
-            )
-
             # Process each keyword chunk
             for i in range(0, len(keyword_texts), 20):
                 chunked_keywords = keyword_texts[i : i + 20]
-                LOGGER.warning(f"Chunked keywords: {len(chunked_keywords)}")
 
                 # Pass chunk information and chunked keywords to the retry function
                 keyword_ideas_pager = exponential_backoff_retry(
@@ -402,19 +380,13 @@ def generate_keywords_ideas_with_chunks(
                     chunk_info=f"{chunk}-{i}",
                 )
 
-                LOGGER.warning(f"Iteration ID: {iteration_id}")
-
                 keyword_ideas = list(keyword_ideas_pager)
                 all_keyword_ideas.extend(keyword_ideas)
-                LOGGER.warning(f"len(all_keyword_ideas): {len(all_keyword_ideas)}")
                 iteration_ids.extend([iteration_id] * len(keyword_ideas))
                 location_ids.extend([chunk] * len(keyword_ideas))
 
                 # Update the progress bar
                 progress = iteration_id / total_chunks
-                LOGGER.warning(
-                    f"Progress: {progress:.2%} - Processed {len(all_keyword_ideas)} keyword ideas"
-                )
                 exec_context.set_progress(
                     progress,
                     f"We have generated  {len(all_keyword_ideas)} keyword ideas so far. More ideas \U0001F4A1 are on the way!. This process may take some time, so please be pacient.",
@@ -446,8 +418,15 @@ def generate_keywords_ideas_with_chunks(
         aggregated_data.append(df_batch)
         aggregated_monthly_volumes.append(df_monthly_batch)
 
+    # After processing all chunks
+    if not aggregated_data and not aggregated_monthly_volumes:
+        raise knext.InvalidParametersError(
+            "No keyword ideas found. The aggregated data and monthly search volumes are empty."
+        )
+
     df_keyword_ideas_aggregated = pd.concat(aggregated_data, ignore_index=True)
     df_monthly_search_volumes = pd.concat(aggregated_monthly_volumes, ignore_index=True)
+    knext.InvalidParametersError
 
     return df_keyword_ideas_aggregated, df_monthly_search_volumes
 

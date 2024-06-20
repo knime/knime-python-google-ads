@@ -198,7 +198,6 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
 
     thirteen_months_ago = date.today() - relativedelta(months=13)
     default_start_value = thirteen_months_ago.replace(day=1)
-    LOGGER.warning(f"this is the default start value: {default_start_value}")
 
     # Here is the website with the reference for the managing the dates in the Google Ads API: https://developers.google.com/google-ads/api/reference/rpc/v16/HistoricalMetricsOptions
     date_start = knext.DateTimeParameter(
@@ -230,7 +229,6 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
 
     one_month_ago = date.today().replace(day=1, month=date.today().month - 1)
     default_end_value = one_month_ago.replace(day=1)
-    LOGGER.warning(f"this is the default end value: {default_end_value}")
 
     date_end = knext.DateTimeParameter(
         label="End date",
@@ -338,8 +336,6 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
 
         keyword_texts = keyword_texts_df[keywords_column].tolist()
 
-        LOGGER.warning(f"Keyword texts: {keyword_texts}")
-
         # Creating the Google Ads Client object
         client: GoogleAdsClient
         client = port_object.client
@@ -371,7 +367,6 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
         language_rn_get_service: GoogleAdsServiceClient
         language_rn_get_service = client.get_service("GoogleAdsService")
         language_rn = language_rn_get_service.language_constant_path(language_id)
-        LOGGER.warning(f"Language id: {language_rn}")
 
         # Do the Keyword Ideas generation and return the table
 

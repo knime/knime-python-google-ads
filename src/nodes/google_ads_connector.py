@@ -147,15 +147,6 @@ class GoogleAdsConnector:
         self, exec_context: knext.ExecutionContext, credential: knext.PortObject
     ):
 
-        LOGGER.warning(f"access_token: {credential.spec.auth_parameters}")
-        LOGGER.warning(f"attributes of the port{dir(credential)}")
-        LOGGER.warning("auth_parameter")
-        LOGGER.warning(f"auth_schema {credential.spec.auth_schema}")
-        LOGGER.warning(f"deserialize {credential.spec.deserialize}")
-        LOGGER.warning(dir(credential.spec))
-        LOGGER.warning(dir(credential.getJavaClassName))
-        LOGGER.warning(f"What developer token I am passing here {self.developer_token}")
-
         # Combine credentials with customer ID
         # Use the access token provided in the input port.
         # Token refresh is handled by the provided refresh handler that requests the token from the input port.
@@ -174,24 +165,13 @@ class GoogleAdsConnector:
             login_customer_id=cleanup_ids(self.manager_customer_id),
         )
 
-        LOGGER.warning(f" GoogleAdsClient object: {dir(client)}")
-
+        # Leaving this Logger because it is useful for testing the authentication via service account.
         mcc = manager_customer_ids(client)
         LOGGER.warning(f" testing client built {mcc[0]}")
 
         campaign_ids = get_campaigns_id(client, cleanup_ids(self.account_id))
 
         test_connection(client)
-
-        # test_customer_id(self.customer_id)
-
-        LOGGER.warning(
-            f"Retrieving connection information...\nDeveloper token: {client.developer_token}\nCustomer ID: {self.account_id}"
-        )
-
-        # TODO Explore the following scenario
-        # 'Get local values ... okay maybe too hacky and too fragile
-        # Pass the whole client or some token in the spec? Is that dangerous?
 
         port_object = GoogleAdConnectionObject(
             GoogleAdObjectSpec(
@@ -229,6 +209,9 @@ def test_customer_id(account_id: str):
     pass
 
 
+# This method is useful to get the connection because we are perfoming a query to get the campaign ids.
+# So we use the client object (build with the developer token the google auth credentials and the Manager Customer ID) and the account id to get the campaign ids.)
+# In case of failure we raise a meaningful error message.
 def get_campaigns_id(client: GoogleAdsClient, account_id: str) -> list[str]:
     query = """
     SELECT
@@ -243,7 +226,6 @@ def get_campaigns_id(client: GoogleAdsClient, account_id: str) -> list[str]:
     search_request = client.get_type("SearchGoogleAdsStreamRequest")
     search_request.customer_id = account_id
     search_request.query = query
-    LOGGER.warning("Setting query done.")
 
     df = pd.DataFrame()
     try:
@@ -284,11 +266,11 @@ def get_campaigns_id(client: GoogleAdsClient, account_id: str) -> list[str]:
         raise knext.InvalidParametersError(error_to_raise)
 
     df_list = pd.DataFrame(df)["campaign.id"].tolist()
-    LOGGER.warning(df_list)
     return df_list
 
 
-# this function is to test the authentication via service account, delete after testing.
+# this function is to test the authentication via service account, delete after implementation.
+# using it because we don't need to use the account id to perfomr the query. Only the dev tokent and the test manager account id.
 def manager_customer_ids(client):
     # Accessing access token from input credential port via DialogCreationContext
     customer_service: CustomerServiceClient

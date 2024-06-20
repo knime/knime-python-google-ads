@@ -203,6 +203,7 @@ class GoogleAdsGeoTargets:
 
                 # Process each batch
                 for i, batch in enumerate(all_batches, start=0):
+                    utils.check_canceled(exec_context)
 
                     header_array = [field for field in batch.field_mask.paths]
 
@@ -212,6 +213,7 @@ class GoogleAdsGeoTargets:
                         data_row = []
                         row: GoogleAdsRow
                         for field in batch.field_mask.paths:
+                            utils.check_canceled(exec_context)
                             # Split the attribute_name string into parts
                             attribute_parts = field.split(".")
 
@@ -220,7 +222,7 @@ class GoogleAdsGeoTargets:
 
                             # Traverse the attribute parts and access the attributes
                             for part in attribute_parts:
-
+                                utils.check_canceled(exec_context)
                                 # query-fix for ADGROUP and AD queries: we are iterating over the attribute_value (type = class) line
                                 # and using the field name splitted to access the values with the getattr(method),
                                 # when trying to use 'type' there is not any attr called like this

@@ -272,6 +272,7 @@ class GoogleAdsQuery:
 
                 # Process each batch
                 for i, batch in enumerate(all_batches, start=0):
+                    utils.check_canceled(exec_context)
 
                     header_array = [field for field in batch.field_mask.paths]
 
@@ -281,6 +282,7 @@ class GoogleAdsQuery:
                         data_row = []
                         row: GoogleAdsRow
                         for field in batch.field_mask.paths:
+                            utils.check_canceled(exec_context)
 
                             # Split the attribute_name string into parts
                             attribute_parts = field.split(".")
