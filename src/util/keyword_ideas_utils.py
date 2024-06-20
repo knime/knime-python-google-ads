@@ -426,7 +426,6 @@ def generate_keywords_ideas_with_chunks(
 
     df_keyword_ideas_aggregated = pd.concat(aggregated_data, ignore_index=True)
     df_monthly_search_volumes = pd.concat(aggregated_monthly_volumes, ignore_index=True)
-    knext.InvalidParametersError
 
     return df_keyword_ideas_aggregated, df_monthly_search_volumes
 
