@@ -274,4 +274,13 @@ class GoogleAdsGeoTargets:
         ##################
         # [END PRIMARY QUERY]
         ##################
+        df.columns = [
+            "Country Code",
+            "Name",
+            "Canonical Name",
+            "ID",
+            "Resource Name",
+            "Target Type",
+            "Parent ID",
+        ]
         return knext.Table.from_pandas(pd.DataFrame(df))
