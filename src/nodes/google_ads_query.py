@@ -326,6 +326,10 @@ class GoogleAdsQuery:
                     )
                 # Create a pandas dataframe with the data and the header
                 df = pd.DataFrame(data, columns=header_array)
+                df.columns = [
+                    col.replace(".", " ").replace("_", " ").title()
+                    for col in df.columns
+                ]
 
         except GoogleAdsException as ex:
             status_error = ex.error.code().name
@@ -344,6 +348,8 @@ class GoogleAdsQuery:
         ##################
         # [END QUERY]
         ##################
+        # Beatufy column names. Title case and replace _ with space
+
         return knext.Table.from_pandas(pd.DataFrame(df))
 
     def define_query(self):

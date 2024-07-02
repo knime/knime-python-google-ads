@@ -72,15 +72,17 @@ def check_column(
     """
     Raises an InvalidParametersError if a column named column_name is not contained in input_table or has the wrong KnimeType.
     """
-
+    if column_name not in input_table.column_names:
+        raise knext.InvalidParametersError(
+            f"The {column_purpose} column '{column_name}' is missing in the input table."
+        )
     ktype = input_table[column_name].ktype
     if ktype != expected_type:
         raise knext.InvalidParametersError(
-            f"The {column_purpose} column '{column_name}' is of type {str(ktype)} but should be of type {str(expected_type)}. If you want to use the column '{column_name}' as {column_purpose} column, please change the column type to {str(expected_type)}. Tip: Use the String Manipulation node to convert the column type."
+            f"The {column_purpose} column '{column_name}' is of type {str(ktype)} but should be of type {str(expected_type)}."
         )
 
 
-# TODO: Pick by default a column of type Long
 def pick_default_column(input_table: knext.Schema, ktype: knext.KnimeType) -> str:
     default_column = pick_default_columns(input_table, ktype, 1)[0]
     return default_column
@@ -95,3 +97,8 @@ def pick_default_columns(
         raise knext.InvalidParametersError(
             f"The input table does not contain enough ({n_columns}) distinct columns of type '{str(ktype)}'. Found: {len(columns)}"
         )
+    return [column_name.name for column_name in columns[:n_columns]]
+
+
+def create_type_filer(ktype: knext.KnimeType) -> Callable[[knext.Column], bool]:
+    return lambda c: c.ktype == ktype

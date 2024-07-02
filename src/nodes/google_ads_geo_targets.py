@@ -146,12 +146,30 @@ class GoogleAdsGeoTargets:
         is_advanced=True,
     )
 
-    def configure(self, configuration_context, spec: GoogleAdObjectSpec):
+    def configure(
+        self,
+        config_context: knext.ConfigurationContext,
+        spec: GoogleAdObjectSpec,
+    ):
         # TODO Check and throw config error maybe if spec.customer_id is not a string or does not have a specific format
         if hasattr(spec, "account_id") == False:
             raise knext.InvalidParametersError(
                 "Connect to the Google Ads Connector node."
             )
+
+        # Define columns
+        columns = [
+            knext.Column(ktype=knext.string(), name="Country Code"),
+            knext.Column(ktype=knext.string(), name="Name"),
+            knext.Column(ktype=knext.string(), name="Canonical Name"),
+            knext.Column(ktype=knext.int64(), name="ID"),
+            knext.Column(ktype=knext.string(), name="Resource Name"),
+            knext.Column(ktype=knext.string(), name="Target Type"),
+            knext.Column(ktype=knext.string(), name="Parent ID"),
+        ]
+
+        # Return the schema
+        return knext.Schema.from_columns(columns)
 
     def execute(
         self,
@@ -193,11 +211,8 @@ class GoogleAdsGeoTargets:
                 all_batches.append(batch)
 
             number_of_batches = len(all_batches)
-            if number_of_batches == 0:
-                exec_context.set_warning(
-                    "No data was returned from the query. The target type is not supported for the selected country. Please try another combination."
-                )
-            else:
+            if number_of_batches != 0:
+
                 # Initialize the iteration counter
                 i = 0
 
@@ -256,6 +271,33 @@ class GoogleAdsGeoTargets:
                     )
                 # Create a DataFrame from the collected data
                 df = pd.DataFrame(data, columns=header_array)
+                df.columns = [
+                    "Country Code",
+                    "Name",
+                    "Canonical Name",
+                    "ID",
+                    "Resource Name",
+                    "Target Type",
+                    "Parent ID",
+                ]
+            else:
+                column_types = {
+                    "Country Code": "string",
+                    "Name": "string",
+                    "Canonical Name": "string",
+                    "ID": "int64",
+                    "Resource Name": "string",
+                    "Target Type": "string",
+                    "Parent ID": "string",
+                }
+
+                # Create an empty DataFrame with the specified column names and types to avoid data spec warnings
+                df = pd.DataFrame(
+                    {col: pd.Series(dtype=typ) for col, typ in column_types.items()}
+                )
+                exec_context.set_warning(
+                    "No data was returned from the query. The target type is not supported for the selected country. Please try another combination."
+                )
 
         except GoogleAdsException as ex:
             status_error = ex.error.code().name
@@ -274,13 +316,5 @@ class GoogleAdsGeoTargets:
         ##################
         # [END PRIMARY QUERY]
         ##################
-        df.columns = [
-            "Country Code",
-            "Name",
-            "Canonical Name",
-            "ID",
-            "Resource Name",
-            "Target Type",
-            "Parent ID",
-        ]
+
         return knext.Table.from_pandas(pd.DataFrame(df))

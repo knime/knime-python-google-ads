@@ -75,10 +75,8 @@ from dateutil.relativedelta import relativedelta
 from google.ads.googleads.errors import GoogleAdsException
 
 import util.keyword_ideas_utils as keyword_ideas_utils
-from util.utils import (
-    check_column,
-    pick_default_column,
-)
+from util.utils import check_column, pick_default_column, create_type_filer
+import numpy as np
 
 
 LOGGER = logging.getLogger(__name__)
@@ -169,20 +167,22 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
 
     keywords_column = knext.ColumnParameter(
         "Seed Column",
-        "KNIME table column containing the kewyords or webpage URLs from which fetch the ideas with the search volume",
+        "KNIME table column containing the kewyords or webpage URLs from which fetch the ideas with the search volume. Only columns with string type are allowed.",
         port_index=1,
         include_row_key=False,
         include_none_column=False,
         since_version=None,
+        column_filter=create_type_filer(knext.string()),
     )
 
     locations_column = knext.ColumnParameter(
         "Locations Column",
-        "KNIME table column containing the location IDs to target",
+        "KNIME table column containing the location IDs to target. Only columns with int64 type are allowed.",
         port_index=2,
         include_row_key=False,
         include_none_column=False,
         since_version=None,
+        column_filter=create_type_filer(knext.int64()),
     )
     # Select language parameter group hardcoded from the CSV in the data folder and built as class (EnumParameterOptions) in the data_utils.py file.
 
@@ -291,25 +291,27 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
             raise ValueError(
                 "The end date cannot be set up for a date earlier than the start date. Please set an end date later than the start date."
             )
-        if self.keywords_column is None:
-            raise knext.InvalidParametersError(
-                "No input column with Keywords or Webpage URLs selected"
-            )
-        if self.locations_column is None:
-            raise knext.InvalidParametersError(
-                "There is no input column with Location IDs selected. Tip: Use the Google Ads Geo Targets node to generate compatible Location IDs for the Google Ads API."
-            )
-
         if self.keywords_column:
             check_column(
-                input_table_schema, self.keywords_column, knext.string(), "seed"
+                input_table_schema, self.keywords_column, knext.string(), "seed data"
+            )
+        else:
+            self.keywords_column = pick_default_column(
+                input_table_schema, knext.string()
             )
 
         if self.locations_column:
             check_column(
-                location_table_schema, self.locations_column, knext.int64(), "locations"
+                location_table_schema,
+                self.locations_column,
+                knext.int64(),
+                "location IDs",
             )
+        else:
 
+            self.locations_column = pick_default_column(
+                location_table_schema, knext.int64()
+            )
         return None, None
 
     def execute(
@@ -387,6 +389,17 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
                 self.keyword_ideas_mode,
                 exec_context,
                 self.rows_per_chunk,
+            )
+        )
+
+        df_keyword_ideas_aggregated = (
+            keyword_ideas_utils.extract_first_item_if_all_chunk_numbers_are_1(
+                self.rows_per_chunk, df_keyword_ideas_aggregated
+            )
+        )
+        df_monthly_search_volumes = (
+            keyword_ideas_utils.extract_first_item_if_all_chunk_numbers_are_1(
+                self.rows_per_chunk, df_monthly_search_volumes
             )
         )
 

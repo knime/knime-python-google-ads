@@ -223,12 +223,12 @@ def parse_monthly_search_volumes(
 ):
     rows = [
         {
-            "keyword": keyword,
-            "month": metrics.month,
-            "year": metrics.year,
-            "monthly searches": metrics.monthly_searches,
-            "iteration_id": iteration_id,
-            "location_ids": location_ids,
+            "Keyword Idea": keyword,
+            "Month": metrics.month,
+            "Year": metrics.year,
+            "Monthly Searches": metrics.monthly_searches,
+            "Chunk Number": iteration_id,
+            "Locations in Chunk": location_ids,
         }
         for metrics in monthly_search_volumes
     ]
@@ -538,10 +538,13 @@ def process_batch(all_keyword_ideas, iteration_ids, location_ids, include_averag
     # Dataframe with the keyword ideas and the aggregated data for the first output table
     df = pd.DataFrame(convert_missing_to_zero(data))
 
+    # Drop the average CPC column if the user does not want to include it
     if include_average_cpc == False:
         df = df.drop(columns=["Average Cost per Click"])
 
+    # Dataframe with the monthly search volumes for the second output table
     df_monthly_search_volumes = pd.concat(monthly_search_volumes_dfs, ignore_index=True)
+
     return df, df_monthly_search_volumes
 
 
@@ -555,6 +558,20 @@ def format_timestamp(seconds):
     minutes, seconds = divmod(remainder, 60)
     microseconds = delta.microseconds
     return f"{int(days):02}:{int(hours):02}:{int(minutes):02}:{int(seconds):02}.{microseconds:06}"
+
+
+def extract_first_item_if_all_chunk_numbers_are_1(chunk_parameter, df):
+    # Check if 'Chunk Number' column exists
+    if "Chunk Number" not in df.columns:
+        return df
+
+    # Check if all values in 'Chunk Number' are 1
+    if chunk_parameter == 1:
+        df["Locations in Chunk"] = df["Locations in Chunk"].apply(
+            lambda x: x[0] if isinstance(x, (list, tuple)) else x
+        )
+
+    return df
 
 
 ###### END of the methods to handle the execution in chunks to avoid resource exhaustion ######
