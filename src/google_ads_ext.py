@@ -53,6 +53,13 @@ main_category = knext.category(
     icon="icons/gads-icon.png",
 )
 
+import os
+
+# Set gRPC to use the native DNS resolver (getaddrinfo()) for better compatibility
+# with diverse network configurations, including those using NetBIOS or custom DNS setups.
+os.environ["GRPC_DNS_RESOLVER"] = "native"
+
+
 import nodes.google_ads_connector
 import nodes.google_ads_query
 import nodes.google_ads_keyword_ideas
