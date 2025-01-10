@@ -227,7 +227,7 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
                 "The start date cannot be set up for a date greater than four years from the current date. Please set a start date within the last four years."
             )
 
-    one_month_ago = date.today().replace(day=1, month=date.today().month - 1)
+    one_month_ago = date.today().replace(day=1) - relativedelta(months=1)
     default_end_value = one_month_ago.replace(day=1)
 
     date_end = knext.DateTimeParameter(
