@@ -120,7 +120,7 @@ class GoogleAdsConnector:
 
     developer_token = knext.StringParameter(
         label="Developer Token",
-        description="The Google developer token is needed to connect to the Google Ads API. It can be obtained following [this docucmentation](https://developers.google.com/google-ads/api/docs/get-started/dev-token?hl=en).",
+        description="The Google developer token is needed to connect to the Google Ads API. It can be obtained following [this documentation](https://developers.google.com/google-ads/api/docs/get-started/dev-token?hl=en).",
         default_value="",
     )  # .rule(knext.OneOf(dev_token_retrieval, [DeveloperTokenRetrieval.MANUALLY.name]),knext.Effect.SHOW,)
 
