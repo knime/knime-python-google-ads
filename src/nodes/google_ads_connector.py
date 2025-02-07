@@ -87,25 +87,28 @@ LOGGER = logging.getLogger(__name__)
     ],
 )
 @knext.input_port(
-    name="Credentials",
-    description="Google Ads credentials",
+    name="Google Connection",
+    description="Google Ads credentials.",
     port_type=knext.PortType.CREDENTIAL,
 )
 @knext.output_port(
-    "Google Client",
-    "Contains necessary tokens and credentials as well as customer ID to access the Google Ads API",
+    "Google Ads Connection",
+    "A connection to a Google Ads account.",
     google_ad_port_type,
 )
 class GoogleAdsConnector:
     """
 
-    This node connects with the Google Ads API, enabling interaction with Google Ads services.
+    This node _connects_ with the specified **Google Ads account** by supplying the _developer token_ and the _linked Google Ads manager account_.
+
+    After executing the node, the connection is established; you can connect the node's output port to other nodes in the extension, such as the `Google Ads Query (Labs)` node, to retrieve information about the campaigns in the selected account.
+
 
     ### **Configuration and Usage**
 
     **Mandatory Upstream Node**: The Google Authenticator node is required upstream. Ensure you provide the scope `https://www.googleapis.com/auth/adwords` there if it is not listed.
 
-    ### **User Requirements**
+    ### **Node Configuration Requirements**
 
     1. **Developer Token**: Available in the API Center section under Tools & Settings.
     2. **Manager Account ID**: Found in the top right corner of the Google Ads dashboard when logged in as a manager.
@@ -113,20 +116,32 @@ class GoogleAdsConnector:
 
     ### **Account Requirements**
 
-    1. A Google Ads account with a Manager account is necessary to use this connector.
-    2. Request a developer token using the [Google Ads API](https://developers.google.com/google-ads/api/docs/get-started/dev-token) link.
+    1. A _Google Ads manager account_ is required to utilize the Google Ads API. Therefore, you need to **link** the target account to a Manager Account.
+    2. Also, a _developer token_ is necessary. Notice that To make API calls against your production account, you must request **Basic Access** or **Standard Access** for your developer token during the token application process. You can request a developer token using the form provided by [Google Ads API](https://developers.google.com/google-ads/api/docs/get-started/dev-token) resources.
+
+    ### **Common Authorization Errors**
+
+    1. **Developer Token Prohibited**: This error can occur, especially if you manage multiple manager accounts and client accounts. *Once you establish a connection using a specific developer token, it becomes permanently associated with the cloud project you used for authentication*. As a result, no other token will work with those credentials. To prevent this, you can follow this prevention [tip](https://developers.google.com/google-ads/api/docs/get-started/common-errors#authorizationerror).
+
+    2. **This App is blocked**:  When you authenticate using Interactive login within the `Google Authenticator` node without using your own Google Cloud project, you use the *default KNIME Google Cloud Project*. Consequently, your Google Workspace administrator may need to allow `knime.com` as a trusted third-party application. To do this, the administrator should follow these steps:
+        1. Go to [admin.google.com](admin.google.com).
+        2. Navigate to `Security > Access and Data Control > API Controls > Manage Third Party App Access`.
+        3. Click on `Configure New App` and search for **knime.com**.
+
+    3. You can find other Common Errors in this [link](https://developers.google.com/google-ads/api/docs/get-started/common-errors).
+
 
     """
 
     developer_token = knext.StringParameter(
         label="Developer Token",
-        description="The Google developer token is needed to connect to the Google Ads API. It can be obtained following [this documentation](https://developers.google.com/google-ads/api/docs/get-started/dev-token?hl=en).",
+        description="The Google developer token is needed to connect to the Google Ads API. It can be obtained following [this documentation](https://developers.google.com/google-ads/api/docs/get-started/dev-token?hl=en). Notice that To make API calls against your production account, you must request **Basic Access** or **Standard Access** for your developer token during the token application process.",
         default_value="",
     )  # .rule(knext.OneOf(dev_token_retrieval, [DeveloperTokenRetrieval.MANUALLY.name]),knext.Effect.SHOW,)
 
     manager_customer_id = knext.StringParameter(
-        label="Manager Customer Id",
-        description="The login-customer-id is equivalent to choosing an account in the Google Ads UI after signing in or clicking on your profile image at the top right.",
+        label="Manager Account Id",
+        description="The manager account id is equivalent to choosing an account in the Google Ads UI after signing in or clicking on your profile image at the top right.",
         default_value="",
     )  # .rule(knext.OneOf(dev_token_retrieval, [DeveloperTokenRetrieval.MANUALLY.name]),knext.Effect.SHOW,)
 
