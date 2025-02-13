@@ -44,18 +44,23 @@
 
 import logging
 import knime.extension as knext
-from google.oauth2.credentials import Credentials
+from google.oauth2.credentials import (
+    Credentials,
+)
 
 # Check if it necessary to import this class to handle the authentication via service account.
-from google.oauth2.service_account import Credentials as Credentials_service
 
 import google_ads_ext
-from google.ads.googleads.client import GoogleAdsClient
+from google.ads.googleads.client import (
+    GoogleAdsClient,
+)
 from google.ads.googleads.v18.services.services.google_ads_service.client import (
     GoogleAdsServiceClient,
 )
 import pandas as pd
-from google.ads.googleads.v18.services.types.google_ads_service import GoogleAdsRow
+from google.ads.googleads.v18.services.types.google_ads_service import (
+    GoogleAdsRow,
+)
 from google.ads.googleads.v18.services.services.customer_service.client import (
     CustomerServiceClient,
 )
@@ -67,7 +72,9 @@ from util.common import (
     GoogleAdConnectionObject,
     google_ad_port_type,
 )
-from google.ads.googleads.errors import GoogleAdsException
+from google.ads.googleads.errors import (
+    GoogleAdsException,
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -99,14 +106,17 @@ LOGGER = logging.getLogger(__name__)
 class GoogleAdsConnector:
     """
 
-    This node _connects_ with the specified **Google Ads account** by supplying the _developer token_ and the _linked Google Ads manager account_.
+    This node _connects_ with the specified **Google Ads account** by supplying the _developer token_ and the
+    _linked Google Ads manager account_.
 
-    After executing the node, the connection is established; you can connect the node's output port to other nodes in the extension, such as the `Google Ads Query (Labs)` node, to retrieve information about the campaigns in the selected account.
-
+    After executing the node, the connection is established; you can connect the node's output port to other nodes
+    in the extension, such as the `Google Ads Query (Labs)` node, to retrieve information about the campaigns in
+    the selected account.
 
     ### **Configuration and Usage**
 
-    **Mandatory Upstream Node**: The Google Authenticator node is required upstream. Ensure you provide the scope `https://www.googleapis.com/auth/adwords` there if it is not listed.
+    **Mandatory Upstream Node**: The Google Authenticator node is required upstream. Ensure you provide the scope
+    `https://www.googleapis.com/auth/adwords` there if it is not listed.
 
     ### **Node Configuration Requirements**
 
@@ -116,32 +126,52 @@ class GoogleAdsConnector:
 
     ### **Account Requirements**
 
-    1. A _Google Ads manager account_ is required to utilize the Google Ads API. Therefore, you need to **link** the target account to a Manager Account.
-    2. Also, a _developer token_ is necessary. Notice that To make API calls against your production account, you must request **Basic Access** or **Standard Access** for your developer token during the token application process. You can request a developer token using the form provided by [Google Ads API](https://developers.google.com/google-ads/api/docs/get-started/dev-token) resources.
+    1. A _Google Ads manager account_ is required to utilize the Google Ads API. Therefore, you need to **link** the
+       target account to a Manager Account.
+    2. Also, a _developer token_ is necessary. To make API calls against your production account, you must
+       request **Basic Access** or **Standard Access** for your developer token during the token application process.
+       You can request a developer token using the form provided by
+       [Google Ads API](https://developers.google.com/google-ads/api/docs/get-started/dev-token) resources.
 
     ### **Common Authorization Errors**
 
-    1. **Developer Token Prohibited**: This error can occur, especially if you manage multiple manager accounts and client accounts. *Once you establish a connection using a specific developer token, it becomes permanently associated with the cloud project you used for authentication*. As a result, no other token will work with those credentials. To prevent this, you can follow this prevention [tip](https://developers.google.com/google-ads/api/docs/get-started/common-errors#authorizationerror).
+    1. **Developer Token Prohibited**: This error can occur, especially if you manage multiple manager accounts and
+       client accounts. *Once you establish a connection using a specific developer token, it becomes permanently
+       associated with the cloud project you used for authentication*. As a result, no other token will work with
+       those credentials. To prevent this, you can follow this prevention
+       [tip](https://developers.google.com/google-ads/api/docs/get-started/common-errors#authorizationerror).
 
-    2. **This App is blocked**:  When you authenticate using Interactive login within the `Google Authenticator` node without using your own Google Cloud project, you use the *default KNIME Google Cloud Project*. Consequently, your Google Workspace administrator may need to allow `knime.com` as a trusted third-party application. To do this, the administrator should follow these steps:
+    2. **This App is blocked**: When you authenticate using Interactive login within the `Google Authenticator` node
+       without using your own Google Cloud project, you use the *default KNIME Google Cloud Project*. Consequently,
+       your Google Workspace administrator may need to allow `knime.com` as a trusted third-party application.
+       To do this, the administrator should follow these steps:
         1. Go to [admin.google.com](admin.google.com).
         2. Navigate to `Security > Access and Data Control > API Controls > Manage Third Party App Access`.
         3. Click on `Configure New App` and search for **knime.com**.
 
-    3. You can find other Common Errors in this [link](https://developers.google.com/google-ads/api/docs/get-started/common-errors).
+    3. You can find other Common Errors in this
+       [link](https://developers.google.com/google-ads/api/docs/get-started/common-errors).
 
 
     """
 
     developer_token = knext.StringParameter(
         label="Developer Token",
-        description="The Google developer token is needed to connect to the Google Ads API. It can be obtained following [this documentation](https://developers.google.com/google-ads/api/docs/get-started/dev-token?hl=en). Notice that To make API calls against your production account, you must request **Basic Access** or **Standard Access** for your developer token during the token application process.",
+        description=(
+            "The Google developer token is needed to connect to the Google Ads API. It can be obtained following "
+            "[this documentation](https://developers.google.com/google-ads/api/docs/get-started/dev-token?hl=en). "
+            "Notice that to make API calls against your production account, you must request **Basic Access** or "
+            "**Standard Access** for your developer token during the token application process."
+        ),
         default_value="",
     )  # .rule(knext.OneOf(dev_token_retrieval, [DeveloperTokenRetrieval.MANUALLY.name]),knext.Effect.SHOW,)
 
     manager_customer_id = knext.StringParameter(
         label="Manager Account Id",
-        description="The manager account id is equivalent to choosing an account in the Google Ads UI after signing in or clicking on your profile image at the top right.",
+        description=(
+            "The manager account ID is equivalent to choosing an account in the Google Ads UI after signing in or "
+            "clicking on your profile image at the top right."
+        ),
         default_value="",
     )  # .rule(knext.OneOf(dev_token_retrieval, [DeveloperTokenRetrieval.MANUALLY.name]),knext.Effect.SHOW,)
 
@@ -158,7 +188,11 @@ class GoogleAdsConnector:
     ):
         return GoogleAdObjectSpec("", [])
 
-    def execute(self, exec_context: knext.ExecutionContext, credential: knext.PortObject):
+    def execute(
+        self,
+        exec_context: knext.ExecutionContext,
+        credential: knext.PortObject,
+    ):
         # Combine credentials with customer ID
         # Use the access token provided in the input port.
         # Token refresh is handled by the provided refresh handler that requests the token from the input port.
@@ -181,46 +215,68 @@ class GoogleAdsConnector:
         mcc = manager_customer_ids(client)
         LOGGER.warning(f" testing client built {mcc[0]}")
 
-        campaign_ids = get_campaigns_id(client, cleanup_ids(self.account_id))
+        campaign_ids = get_campaigns_id(
+            client,
+            cleanup_ids(self.account_id),
+        )
 
         test_connection(client)
 
         port_object = GoogleAdConnectionObject(
-            GoogleAdObjectSpec(account_id=cleanup_ids(self.account_id), campaign_ids=campaign_ids),
+            GoogleAdObjectSpec(
+                account_id=cleanup_ids(self.account_id),
+                campaign_ids=campaign_ids,
+            ),
             client=client,
         )
         return port_object
 
 
-def get_refresh_handler(spec: knext.CredentialPortObjectSpec) -> callable:
+def get_refresh_handler(
+    spec: knext.CredentialPortObjectSpec,
+) -> callable:
     """Returns a function that returns the access token and the expiration time of the access token."""
-    return lambda request, scopes: (spec.auth_parameters, spec.expires_after)
+    return lambda request, scopes: (
+        spec.auth_parameters,
+        spec.expires_after,
+    )
 
 
-def cleanup_ids(id: str) -> str:
+def cleanup_ids(
+    id: str,
+) -> str:
     if id.strip() == "":
         raise knext.InvalidParametersError("Please review your Manager Customer Id and your Account Id")
     return id.replace("-", "").strip()
 
 
-def test_connection(client: GoogleAdsClient):
+def test_connection(
+    client: GoogleAdsClient,
+):
     # TODO Implement
     #     1. Check whether client can access API, else throw error
     #     1.a Refresh token can be falsy, the following errors could appear on KNIME console
-    #         WARN  Google Ads Query     3:5        Execute failed: No connection data found. Re-execute the upstream node to refresh the connection.
+    #         WARN  Google Ads Query     3:5        Execute failed: No connection data found.
+    #         Re-execute the upstream node to refresh the connection.
     #         ERROR Google Ads Query     3:5        Execute failed: Error while sending a command.
     pass
 
 
-def test_customer_id(account_id: str):
+def test_customer_id(
+    account_id: str,
+):
     # TODO Implement
     pass
 
 
 # This method is useful to get the connection because we are perfoming a query to get the campaign ids.
-# So we use the client object (build with the developer token the google auth credentials and the Manager Customer ID) and the account id to get the campaign ids.)
+# So we use the client object (build with the developer token the google auth credentials and the Manager Customer ID)
+#  and the account id to get the campaign ids.)
 # In case of failure we raise a meaningful error message.
-def get_campaigns_id(client: GoogleAdsClient, account_id: str) -> list[str]:
+def get_campaigns_id(
+    client: GoogleAdsClient,
+    account_id: str,
+) -> list[str]:
     query = """
     SELECT
         campaign.id,
@@ -252,11 +308,17 @@ def get_campaigns_id(client: GoogleAdsClient, account_id: str) -> list[str]:
                     attribute_value = row
                     # Traverse the attribute parts and access the attributes
                     for part in attribute_parts:
-                        attribute_value = getattr(attribute_value, part)
+                        attribute_value = getattr(
+                            attribute_value,
+                            part,
+                        )
                     data_row.append(attribute_value)
                 data.append(data_row)
 
-        df = pd.DataFrame(data, columns=header_array)
+        df = pd.DataFrame(
+            data,
+            columns=header_array,
+        )
 
     except GoogleAdsException as ex:
         status_error = ex.error.code().name
@@ -270,7 +332,12 @@ def get_campaigns_id(client: GoogleAdsClient, account_id: str) -> list[str]:
             ]
         )
         error_second_part = " ".join([error_messages])
-        error_to_raise = ". ".join([error_first_part, error_second_part])
+        error_to_raise = ". ".join(
+            [
+                error_first_part,
+                error_second_part,
+            ]
+        )
         raise knext.InvalidParametersError(error_to_raise)
 
     df_list = pd.DataFrame(df)["campaign.id"].tolist()
@@ -278,8 +345,11 @@ def get_campaigns_id(client: GoogleAdsClient, account_id: str) -> list[str]:
 
 
 # this function is to test the authentication via service account, delete after implementation.
-# using it because we don't need to use the account id to perfomr the query. Only the dev tokent and the test manager account id.
-def manager_customer_ids(client):
+# using it because we don't need to use the account id to perfomr the query. Only the dev tokent
+# and the test manager account id.
+def manager_customer_ids(
+    client,
+):
     # Accessing access token from input credential port via DialogCreationContext
     customer_service: CustomerServiceClient
     customer_service = client.get_service("CustomerService")
