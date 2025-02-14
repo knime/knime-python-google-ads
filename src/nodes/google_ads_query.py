@@ -53,12 +53,12 @@ from util.common import (
     google_ad_port_type,
 )
 import util.pre_built_ad_queries as pb_queries
-from google.ads.googleads.v16.services.services.google_ads_service.client import (
+from google.ads.googleads.v18.services.services.google_ads_service.client import (
     GoogleAdsServiceClient,
 )
 from google.ads.googleads.errors import GoogleAdsException
 
-from google.ads.googleads.v16.services.types.google_ads_service import GoogleAdsRow
+from google.ads.googleads.v18.services.types.google_ads_service import GoogleAdsRow
 from google.protobuf.internal.containers import RepeatedScalarFieldContainer
 from google.protobuf.pyext import _message
 import util.utils as utils
@@ -70,11 +70,14 @@ LOGGER = logging.getLogger(__name__)
 class QueryBuilderMode(knext.EnumParameterOptions):
     PREBUILT = (
         "Pre-built",
-        "These pre-built queries provide a set of queries in Google Ads Query Language that return the same data as the screens in the [Google Ads UI](https://developers.google.com/google-ads/api/docs/query/cookbook).",
+        "These pre-built queries provide a set of queries in Google Ads Query Language that return the same data "
+        "as the screens in the [Google Ads UI](https://developers.google.com/google-ads/api/docs/query/cookbook).",
     )
+
     MANUALLY = (
         "Custom",
-        "Build your query using [Google Ads Query Builder](https://developers.google.com/google-ads/api/fields/v12/overview_query_builder), then validate it with [Google Ads Query Validator](https://developers.google.com/google-ads/api/fields/v12/query_validator) for desired results.",
+        "Build your query using [Google Ads Query Builder](https://developers.google.com/google-ads/api/fields/v12/overview_query_builder),"
+        "then validate it with [Google Ads Query Validator](https://developers.google.com/google-ads/api/fields/v12/query_validator) for desired results.",
     )
 
 
@@ -116,7 +119,7 @@ class GoogleAdsQuery:
 
         - If you are comfortable with SQL, you can use the custom mode to leverage the Google Ads Query Language (GAQL) to fetch your data.
         - This mode is versatile and gives greater control over the data you retrieve. For more information, refer to the [Google Ads Query Language Guide](https://developers.google.com/google-ads/api/docs/query/overview).
-        - Additionally, you can validate your queries to ensure they are correct. Refer to the [Query Validation Guide](https://developers.google.com/google-ads/api/fields/v16/query_validator).
+        - Additionally, you can validate your queries to ensure they are correct. Refer to the [Query Validation Guide](https://developers.google.com/google-ads/api/fields/v18/query_validator).
 
     **Advanced Settings**
 
@@ -202,9 +205,7 @@ class GoogleAdsQuery:
     def configure(self, configuration_context, spec: GoogleAdObjectSpec):
         # TODO Check and throw config error maybe if spec.customer_id is not a string or does not have a specific format
         if hasattr(spec, "account_id") == False:
-            raise knext.InvalidParametersError(
-                "Connect to the Google Ads Connector node."
-            )
+            raise knext.InvalidParametersError("Connect to the Google Ads Connector node.")
         pass  # Which configuration I need to pass?? explain better the configure method, not 100% clear.
 
     def execute(
@@ -212,7 +213,6 @@ class GoogleAdsQuery:
         exec_context: knext.ExecutionContext,
         port_object: GoogleAdConnectionObject,
     ):
-
         # counter to build the progress bar during execution
         # i = 0
         # Build the client Object
@@ -236,9 +236,7 @@ class GoogleAdsQuery:
         FROM campaign"""
 
         if execution_query == "":
-            exec_context.set_warning(
-                "Used default query because you didn't provide one."
-            )
+            exec_context.set_warning("Used default query because you didn't provide one.")
             execution_query = DEFAULT_QUERY
 
         ga_service: GoogleAdsServiceClient
@@ -250,9 +248,7 @@ class GoogleAdsQuery:
 
         df = pd.DataFrame()
         try:
-            response_stream = ga_service.search_stream(
-                search_request, timeout=self.custom_timeout
-            )
+            response_stream = ga_service.search_stream(search_request, timeout=self.custom_timeout)
             # Initialize the necessary variables
             data = []
             header_array = []
@@ -292,7 +288,6 @@ class GoogleAdsQuery:
 
                             # Traverse the attribute parts and access the attributes
                             for part in attribute_parts:
-
                                 # query-fix for ADGROUP and AD queries: we are iterating over the attribute_value (type = class) line
                                 # and using the field name splitted to access the values with the getattr(method),
                                 # when trying to use 'type' there is not any attr called like this
@@ -306,10 +301,7 @@ class GoogleAdsQuery:
                                 # query-fix for AD query. Explanation for the below if: when fetching the field "final_urls" from the response_stream, it returned a [] type that was not in any Python readable type.
                                 # indeed the type was this protobuf RepeatedScalarFieldContainer. The goal of the if clause is to convert the empty list to empty strings and extract the RepeatedScalarFieldContainer( similar to list type) element
                                 # for reference https://googleapis.dev/python/protobuf/latest/google/protobuf/internal/containers.html
-                                if (
-                                    type(attribute_value)
-                                    is _message.RepeatedScalarContainer
-                                ):
+                                if type(attribute_value) is _message.RepeatedScalarContainer:
                                     attribute_value: RepeatedScalarFieldContainer
                                     if len(attribute_value) == 0:
                                         attribute_value = ""
@@ -321,15 +313,11 @@ class GoogleAdsQuery:
                     # Set up the progress bar taking the toal number of batches and the batch iteration counter (1 batch = 10.000 rows)
                     exec_context.set_progress(
                         i / number_of_batches,
-                        str(i * 10000)
-                        + " rows processed. We are preparing your data \U0001F468\u200D\U0001F373",
+                        str(i * 10000) + " rows processed. We are preparing your data \U0001f468\u200d\U0001f373",
                     )
                 # Create a pandas dataframe with the data and the header
                 df = pd.DataFrame(data, columns=header_array)
-                df.columns = [
-                    col.replace(".", " ").replace("_", " ").title()
-                    for col in df.columns
-                ]
+                df.columns = [col.replace(".", " ").replace("_", " ").title() for col in df.columns]
 
         except GoogleAdsException as ex:
             status_error = ex.error.code().name
@@ -358,7 +346,5 @@ class GoogleAdsQuery:
         if self.query_mode == "MANUALLY":
             query = self.query_custom
         elif self.query_mode == "PREBUILT":
-            query = pb_queries.get_query(
-                self.query_prebuilt_name, self.date_start_query, self.date_end_query
-            )
+            query = pb_queries.get_query(self.query_prebuilt_name, self.date_start_query, self.date_end_query)
         return query
