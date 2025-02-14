@@ -44,7 +44,7 @@
 
 #####################
 
-# As the node reference https://developers.google.com/google-ads/api/fields/v16/geo_target_constant
+# As the node reference https://developers.google.com/google-ads/api/fields/v18/geo_target_constant
 
 #####################
 import logging
@@ -58,12 +58,12 @@ from util.common import (
     google_ad_port_type,
 )
 import util.pre_built_ad_queries as pb_queries
-from google.ads.googleads.v16.services.services.google_ads_service.client import (
+from google.ads.googleads.v18.services.services.google_ads_service.client import (
     GoogleAdsServiceClient,
 )
 from google.ads.googleads.errors import GoogleAdsException
 
-from google.ads.googleads.v16.services.types.google_ads_service import GoogleAdsRow
+from google.ads.googleads.v18.services.types.google_ads_service import GoogleAdsRow
 from google.protobuf.internal.containers import RepeatedScalarFieldContainer
 from google.protobuf.pyext import _message
 import util.utils as utils
@@ -153,9 +153,7 @@ class GoogleAdsGeoTargets:
     ):
         # TODO Check and throw config error maybe if spec.customer_id is not a string or does not have a specific format
         if hasattr(spec, "account_id") == False:
-            raise knext.InvalidParametersError(
-                "Connect to the Google Ads Connector node."
-            )
+            raise knext.InvalidParametersError("Connect to the Google Ads Connector node.")
 
         # Define columns
         columns = [
@@ -181,9 +179,7 @@ class GoogleAdsGeoTargets:
         client = port_object.client
         account_id = port_object.spec.account_id
 
-        primary_query = geo_queries.get_country_type_query(
-            self.country_selection, self.target_type
-        )
+        primary_query = geo_queries.get_country_type_query(self.country_selection, self.target_type)
 
         ga_service: GoogleAdsServiceClient
         ga_service = client.get_service("GoogleAdsService")
@@ -197,9 +193,7 @@ class GoogleAdsGeoTargets:
         # [START PRIMARY QUERY]
         ##################
         try:
-            response_stream = ga_service.search_stream(
-                search_request, timeout=self.custom_timeout
-            )
+            response_stream = ga_service.search_stream(search_request, timeout=self.custom_timeout)
 
             # Initialize the necessary variables
             data = []
@@ -212,7 +206,6 @@ class GoogleAdsGeoTargets:
 
             number_of_batches = len(all_batches)
             if number_of_batches != 0:
-
                 # Initialize the iteration counter
                 i = 0
 
@@ -251,10 +244,7 @@ class GoogleAdsGeoTargets:
                                 # query-fix for AD query. Explanation for the below if: when fetching the field "final_urls" from the response_stream, it returned a [] type that was not in any Python readable type.
                                 # indeed the type was this protobuf RepeatedScalarFieldContainer. The goal of the if clause is to convert the empty list to empty strings and extract the RepeatedScalarFieldContainer( similar to list type) element
                                 # for reference https://googleapis.dev/python/protobuf/latest/google/protobuf/internal/containers.html
-                                if (
-                                    type(attribute_value)
-                                    is _message.RepeatedScalarContainer
-                                ):
+                                if type(attribute_value) is _message.RepeatedScalarContainer:
                                     attribute_value: RepeatedScalarFieldContainer
                                     if len(attribute_value) == 0:
                                         attribute_value = ""
@@ -266,8 +256,7 @@ class GoogleAdsGeoTargets:
                     # Set up the progress bar
                     exec_context.set_progress(
                         i / number_of_batches,
-                        str(i * 10000)
-                        + " rows processed. We are preparing your data \U0001F468\u200D\U0001F373",
+                        str(i * 10000) + " rows processed. We are preparing your data \U0001f468\u200d\U0001f373",
                     )
                 # Create a DataFrame from the collected data
                 df = pd.DataFrame(data, columns=header_array)
@@ -292,9 +281,7 @@ class GoogleAdsGeoTargets:
                 }
 
                 # Create an empty DataFrame with the specified column names and types to avoid data spec warnings
-                df = pd.DataFrame(
-                    {col: pd.Series(dtype=typ) for col, typ in column_types.items()}
-                )
+                df = pd.DataFrame({col: pd.Series(dtype=typ) for col, typ in column_types.items()})
                 exec_context.set_warning(
                     "No data was returned from the query. The target type is not supported for the selected country. Please try another combination."
                 )
