@@ -51,15 +51,15 @@ from google.oauth2.service_account import Credentials as Credentials_service
 
 import google_ads_ext
 from google.ads.googleads.client import GoogleAdsClient
-from google.ads.googleads.v16.services.services.google_ads_service.client import (
+from google.ads.googleads.v18.services.services.google_ads_service.client import (
     GoogleAdsServiceClient,
 )
 import pandas as pd
-from google.ads.googleads.v16.services.types.google_ads_service import GoogleAdsRow
-from google.ads.googleads.v16.services.services.customer_service.client import (
+from google.ads.googleads.v18.services.types.google_ads_service import GoogleAdsRow
+from google.ads.googleads.v18.services.services.customer_service.client import (
     CustomerServiceClient,
 )
-from google.ads.googleads.v16.services.types.customer_service import (
+from google.ads.googleads.v18.services.types.customer_service import (
     ListAccessibleCustomersResponse,
 )
 from util.common import (
@@ -143,10 +143,7 @@ class GoogleAdsConnector:
     ):
         return GoogleAdObjectSpec("", [])
 
-    def execute(
-        self, exec_context: knext.ExecutionContext, credential: knext.PortObject
-    ):
-
+    def execute(self, exec_context: knext.ExecutionContext, credential: knext.PortObject):
         # Combine credentials with customer ID
         # Use the access token provided in the input port.
         # Token refresh is handled by the provided refresh handler that requests the token from the input port.
@@ -174,9 +171,7 @@ class GoogleAdsConnector:
         test_connection(client)
 
         port_object = GoogleAdConnectionObject(
-            GoogleAdObjectSpec(
-                account_id=cleanup_ids(self.account_id), campaign_ids=campaign_ids
-            ),
+            GoogleAdObjectSpec(account_id=cleanup_ids(self.account_id), campaign_ids=campaign_ids),
             client=client,
         )
         return port_object
@@ -189,9 +184,7 @@ def get_refresh_handler(spec: knext.CredentialPortObjectSpec) -> callable:
 
 def cleanup_ids(id: str) -> str:
     if id.strip() == "":
-        raise knext.InvalidParametersError(
-            "Please review your Manager Customer Id and your Account Id"
-        )
+        raise knext.InvalidParametersError("Please review your Manager Customer Id and your Account Id")
     return id.replace("-", "").strip()
 
 
