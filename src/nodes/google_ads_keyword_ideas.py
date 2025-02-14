@@ -52,22 +52,22 @@ from util.common import (
     google_ad_port_type,
 )
 from google.ads.googleads.client import GoogleAdsClient
-from google.ads.googleads.v16.services.services.google_ads_service.client import (
+from google.ads.googleads.v18.services.services.google_ads_service.client import (
     GoogleAdsServiceClient,
 )
-from google.ads.googleads.v16.services.services.keyword_plan_idea_service.client import (
+from google.ads.googleads.v18.services.services.keyword_plan_idea_service.client import (
     KeywordPlanIdeaServiceClient,
 )
-from google.ads.googleads.v16.services.services.geo_target_constant_service.client import (
+from google.ads.googleads.v18.services.services.geo_target_constant_service.client import (
     GeoTargetConstantServiceClient,
 )
-from google.ads.googleads.v16.services.types.keyword_plan_idea_service import (
+from google.ads.googleads.v18.services.types.keyword_plan_idea_service import (
     GenerateKeywordIdeasRequest,
 )
-from google.ads.googleads.v16.enums.types.keyword_plan_competition_level import (
+from google.ads.googleads.v18.enums.types.keyword_plan_competition_level import (
     KeywordPlanCompetitionLevelEnum,
 )
-from google.ads.googleads.v16.enums.types.keyword_plan_network import (
+from google.ads.googleads.v18.enums.types.keyword_plan_network import (
     KeywordPlanNetworkEnum,
 )
 from datetime import date, datetime
@@ -199,7 +199,7 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
     thirteen_months_ago = date.today() - relativedelta(months=13)
     default_start_value = thirteen_months_ago.replace(day=1)
 
-    # Here is the website with the reference for the managing the dates in the Google Ads API: https://developers.google.com/google-ads/api/reference/rpc/v16/HistoricalMetricsOptions
+    # Here is the website with the reference for the managing the dates in the Google Ads API: https://developers.google.com/google-ads/api/reference/rpc/v18/HistoricalMetricsOptions
     date_start = knext.DateTimeParameter(
         label="Start date",
         description="Define the start date for the keywords historical metrics. The default is 13 months ago from the current date. The maximum date range is 4 years.",
@@ -292,13 +292,9 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
                 "The end date cannot be set up for a date earlier than the start date. Please set an end date later than the start date."
             )
         if self.keywords_column:
-            check_column(
-                input_table_schema, self.keywords_column, knext.string(), "seed data"
-            )
+            check_column(input_table_schema, self.keywords_column, knext.string(), "seed data")
         else:
-            self.keywords_column = pick_default_column(
-                input_table_schema, knext.string()
-            )
+            self.keywords_column = pick_default_column(input_table_schema, knext.string())
 
         if self.locations_column:
             check_column(
@@ -308,10 +304,7 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
                 "location IDs",
             )
         else:
-
-            self.locations_column = pick_default_column(
-                location_table_schema, knext.int64()
-            )
+            self.locations_column = pick_default_column(location_table_schema, knext.int64())
         return None, None
 
     def execute(
@@ -356,14 +349,10 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
 
         # Container for enumeration of keyword plan forecastable network types
         keyword_plan_network: KeywordPlanNetworkEnum
-        keyword_plan_network = (
-            client.enums.KeywordPlanNetworkEnum.GOOGLE_SEARCH_AND_PARTNERS
-        )
+        keyword_plan_network = client.enums.KeywordPlanNetworkEnum.GOOGLE_SEARCH_AND_PARTNERS
 
         # List the location IDs
-        location_rns = keyword_ideas_utils.map_locations_ids_to_resource_names(
-            client, location_ids_list
-        )
+        location_rns = keyword_ideas_utils.map_locations_ids_to_resource_names(client, location_ids_list)
 
         # Returns a fully-qualified language_constant string.
         language_rn_get_service: GoogleAdsServiceClient
@@ -392,19 +381,13 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
             )
         )
 
-        df_keyword_ideas_aggregated = (
-            keyword_ideas_utils.extract_first_item_if_all_chunk_numbers_are_1(
-                self.rows_per_chunk, df_keyword_ideas_aggregated
-            )
+        df_keyword_ideas_aggregated = keyword_ideas_utils.extract_first_item_if_all_chunk_numbers_are_1(
+            self.rows_per_chunk, df_keyword_ideas_aggregated
         )
-        df_monthly_search_volumes = (
-            keyword_ideas_utils.extract_first_item_if_all_chunk_numbers_are_1(
-                self.rows_per_chunk, df_monthly_search_volumes
-            )
+        df_monthly_search_volumes = keyword_ideas_utils.extract_first_item_if_all_chunk_numbers_are_1(
+            self.rows_per_chunk, df_monthly_search_volumes
         )
 
-        return knext.Table.from_pandas(
-            df_keyword_ideas_aggregated
-        ), knext.Table.from_pandas(df_monthly_search_volumes)
+        return knext.Table.from_pandas(df_keyword_ideas_aggregated), knext.Table.from_pandas(df_monthly_search_volumes)
 
         # [END generate_keyword_ideas]
