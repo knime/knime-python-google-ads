@@ -4,7 +4,7 @@ env_yml_path: conda_env.yml
 extension_module: src/google_ads_ext
 description: KNIME Nodes for Google Ads (Labs)
 group_id: org.knime.python
-version: 5.4.2
+version: 5.4.3
 vendor: KNIME AG, Zurich, Switzerland
 license_file: LICENSE.txt
 feature_dependencies:
