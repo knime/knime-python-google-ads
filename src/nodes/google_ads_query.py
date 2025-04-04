@@ -57,7 +57,7 @@ from google.ads.googleads.v18.services.services.google_ads_service.client import
     GoogleAdsServiceClient,
 )
 from google.ads.googleads.errors import GoogleAdsException
-
+from google.ads.googleads.v18 import enums as google_ads_enums
 from google.ads.googleads.v18.services.types.google_ads_service import GoogleAdsRow
 from google.protobuf.internal.containers import RepeatedScalarFieldContainer
 from google.protobuf.pyext import _message
@@ -336,7 +336,11 @@ class GoogleAdsQuery:
         ##################
         # [END QUERY]
         ##################
-        # Beatufy column names. Title case and replace _ with space
+
+        inspector = pb_queries.FieldInspector(client, google_ads_enums, LOGGER)
+
+        # Mutate df in-place
+        inspector.process_dataframe(df, execution_query)
 
         return knext.Table.from_pandas(pd.DataFrame(df))
 
