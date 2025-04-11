@@ -82,7 +82,7 @@ LOGGER = logging.getLogger(__name__)
 @knext.node(
     name="Google Ads Connector (Labs)",
     node_type=knext.NodeType.MANIPULATOR,
-    icon_path="icons\google_ads_connector_logo.png",
+    icon_path="icons/google_ads_connector_logo.png",
     category=google_ads_ext.main_category,
     keywords=[
         "Google",
