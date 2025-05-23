@@ -2,6 +2,7 @@ import knime.extension as knext
 import logging
 import re
 import importlib
+import pandas as pd
 
 
 Logger = logging.getLogger(__name__)
@@ -175,124 +176,103 @@ class FieldInspector:
         self.enums_module = enums_module
         self.logger = logger
         self.enum_value_map = {}  # enum_type → {int: label}
-        self._enum_field_cache = {}  # field name → enum type
+        self._column_to_field_map = {}  # human-readable column name → GAQL field
 
     def _extract_field_names(self, query: str) -> list[str]:
         match = re.search(r"SELECT\s+(.*?)\s+FROM", query, re.IGNORECASE | re.DOTALL)
         if not match:
             return []
         fields = match.group(1)
-        return list(set(re.findall(r"\b([a-z_]+\.[a-z_]+)\b", fields)))
+        return list(set(re.findall(r"\b([a-z_]+(?:\.[a-z_]+)+)\b", fields)))
 
-    def _enum_to_module_path(self, outer_enum: str) -> str:
-        base = outer_enum.removesuffix("Enum")
-        return re.sub(r"(?<!^)(?=[A-Z])", "_", base).lower()
+    def get_enum_types_for_fields(self, field_names: list[str]) -> dict[str, str]:
+        self.logger.warning(f"Getting enum types for fields: {field_names}")
+        field_service = self.client.get_service("GoogleAdsFieldService")
+        result = {}
+
+        chunks = [field_names[i : i + 50] for i in range(0, len(field_names), 50)]
+        for chunk in chunks:
+            quoted_names = ",".join(f'"{name}"' for name in chunk)
+            query = f"SELECT name, data_type, type_url WHERE name IN ({quoted_names})"
+            request = self.client.get_type("SearchGoogleAdsFieldsRequest")
+            request.query = query
+
+            try:
+                response = field_service.search_google_ads_fields(request=request)
+                for field in response:
+                    self.logger.warning(f"Field '{field.name}' has data_type: {field.data_type}")
+                    if field.data_type == 5:  # ENUM
+                        type_url = getattr(field, "type_url", None)
+                        enum_type = None
+                        if type_url and "enums" in type_url:
+                            parts = type_url.split(".")
+                            if len(parts) >= 2:
+                                enum_type = f"{parts[-2]}.{parts[-1]}"
+
+                        if enum_type:
+                            self.logger.warning(f"Enum type for field '{field.name}': {enum_type}")
+                            result[field.name] = enum_type
+            except Exception as e:
+                self.logger.warning(f"Failed to query enum types: {e}")
+
+        return result
+
+    def _resolve_enum_class(self, dotted_name: str):
+        obj = self.client.enums
+        self.logger.warning(f"[Resolver] Starting at: client.enums")
+
+        for part in dotted_name.split("."):
+            self.logger.warning(f"[Resolver] Traversing: '{part}' on {obj}")
+            obj = getattr(obj, part)
+
+        self.logger.warning(f"[Resolver] Final resolved enum class: {obj}")
+        return obj
 
     def _load_enum_mapping(self, enum_type_name: str) -> dict[int, str]:
         if enum_type_name in self.enum_value_map:
+            self.logger.warning(f"[Loader] Cache hit for '{enum_type_name}'")
             return self.enum_value_map[enum_type_name]
 
         try:
-            outer_enum, inner_enum = enum_type_name.split(".")
-            module_snake = self._enum_to_module_path(outer_enum)
-            module_path = f"google.ads.googleads.v18.enums.types.{module_snake}"
-            self.logger.warning(f"Trying to import enum module: '{module_path}' for '{enum_type_name}'")
+            self.logger.warning(f"[Loader] Resolving enum class for '{enum_type_name}'")
+            enum_class = self._resolve_enum_class(enum_type_name)
 
-            enum_module = importlib.import_module(module_path)
-            outer_class = getattr(enum_module, outer_enum, None)
+            self.logger.warning(f"[Loader] Enum class keys: {list(enum_class.keys())}")
 
-            if not outer_class:
-                self.logger.warning(f"Enum outer class '{outer_enum}' not found in module.")
-                return {}
+            mapping = {value: name.replace("_", " ").title() for name, value in enum_class.items()}
 
-            enum_class = getattr(outer_class, inner_enum, None)
-
-            if not enum_class or not hasattr(enum_class, "__members__"):
-                self.logger.warning(
-                    f"Enum class '{enum_type_name}' resolved to {enum_class} — it has no '__members__'."
-                )
-                return {}
-
-            mapping = {
-                member.value: member.name.replace("_", " ").title() for member in enum_class.__members__.values()
-            }
-
+            self.logger.warning(f"[Loader] Final mapping: {mapping}")
             self.enum_value_map[enum_type_name] = mapping
             return mapping
 
         except Exception as e:
-            self.logger.warning(f"Failed to load enum '{enum_type_name}': {e}")
+            self.logger.warning(f"[Loader] Failed to load enum mapping for '{enum_type_name}': {e}")
             return {}
 
-    def _guess_enum_type_from_field(self, field_name: str) -> str | None:
-        parts = field_name.split(".")
-        if len(parts) != 2:
-            return None
-
-        resource, attr = parts
-
-        def to_pascal(s):
-            return "".join(part.capitalize() for part in s.split("_"))
-
-        guesses = [
-            f"{to_pascal(resource)}Enum.{to_pascal(resource)}{to_pascal(attr)}",
-            f"{to_pascal(resource)}{to_pascal(attr)}Enum.{to_pascal(resource)}{to_pascal(attr)}",
-            f"{to_pascal(resource)}{to_pascal(attr)}Enum.{to_pascal(attr)}",
-            f"{to_pascal(attr)}Enum.{to_pascal(attr)}",
-        ]
-
-        for guess in guesses:
-            if self._load_enum_mapping(guess):
-                self.logger.warning(f"Guessed enum type for '{field_name}': {guess}")
-                return guess
-
-        self.logger.warning(f"Could not infer enum type for field '{field_name}'.")
-        return None
-
-    def get_enum_types_for_fields(self, field_names: list[str]) -> dict[str, str]:
-        field_service = self.client.get_service("GoogleAdsFieldService")
-        result = {}
-
-        uncached_fields = [f for f in field_names if f not in self._enum_field_cache]
-
-        if uncached_fields:
-            chunks = [uncached_fields[i : i + 50] for i in range(0, len(uncached_fields), 50)]
-            for chunk in chunks:
-                quoted_names = ",".join(f'"{name}"' for name in chunk)
-                query = f"SELECT name, data_type WHERE name IN ({quoted_names})"
-                request = self.client.get_type("SearchGoogleAdsFieldsRequest")
-                request.query = query
-
-                try:
-                    response = field_service.search_google_ads_fields(request=request)
-                    for field in response:
-                        if field.data_type == 5:  # ENUM
-                            enum_type = getattr(field, "enum_type", None) or self._guess_enum_type_from_field(
-                                field.name
-                            )
-                            self._enum_field_cache[field.name] = enum_type
-                        else:
-                            self._enum_field_cache[field.name] = None
-                except Exception as e:
-                    self.logger.warning(f"Failed to query enum types: {e}")
-
+    def build_column_to_field_map(self, df_columns, field_names):
+        mapping = {}
         for field in field_names:
-            enum_type = self._enum_field_cache.get(field)
-            if enum_type:
-                result[field] = enum_type
-
-        return result
+            readable = field.replace(".", " ").replace("_", " ").title()
+            mapping[readable] = field
+        self._column_to_field_map = mapping
+        self.logger.warning(f"Column to GAQL field map: {self._column_to_field_map}")
 
     def process_dataframe(self, df, gaql_query: str) -> None:
         field_names = self._extract_field_names(gaql_query)
+        self.logger.warning(f"Extracted field names from GAQL: {field_names}")
         enum_field_map = self.get_enum_types_for_fields(field_names)
+        self.logger.warning(f"Enum field map: {enum_field_map}")
+
+        self.build_column_to_field_map(df.columns, field_names)
 
         for col in df.columns:
-            normalized = col.lower().replace(" ", "_").replace("_", ".", 1)
-            enum_type = enum_field_map.get(normalized)
+            gaql_field = self._column_to_field_map.get(col)
+            enum_type = enum_field_map.get(gaql_field)
+            self.logger.warning(f"Checking column '{col}' → GAQL field: '{gaql_field}' → enum: {enum_type}")
 
             if enum_type:
                 value_map = self._load_enum_mapping(enum_type)
+                self.logger.warning(f"Enum value map for '{col}': {value_map}")
                 if value_map:
                     try:
                         df[col] = df[col].map(value_map).fillna(df[col])
@@ -302,10 +282,10 @@ class FieldInspector:
                 else:
                     self.logger.warning(f"No enum values matched for column: '{col}' — values unchanged.")
 
+    def rename_columns(self, df):
         rename_map = {}
         for col in df.columns:
             new_col = col
-
             if col.lower().endswith("micros") and df[col].dtype in ("int64", "float64"):
                 df[col] = df[col] / 1_000_000
                 new_col = new_col.replace("Micros", "").replace("micros", "").strip()
@@ -320,3 +300,4 @@ class FieldInspector:
 
         if rename_map:
             df.rename(columns=rename_map, inplace=True)
+            self.logger.warning(f"Applied column renaming: {rename_map}")
