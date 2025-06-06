@@ -71,7 +71,6 @@ google_ads_types_module = importlib.import_module(
 GoogleAdsRow = getattr(google_ads_types_module, "GoogleAdsRow")
 
 QUERY_VALIDATOR_URL = f"https://developers.google.com/google-ads/api/fields/{GOOGLE_ADS_API_VERSION}/query_validator"
-
 QUERY_BUILDER_URL = (
     f"https://developers.google.com/google-ads/api/fields/{GOOGLE_ADS_API_VERSION}/overview_query_builder"
 )
@@ -114,7 +113,8 @@ class QueryBuilderMode(knext.EnumParameterOptions):
 @knext.output_table(name="Output Data", description="KNIME table with query results")
 class GoogleAdsQuery:
     """
-    The Google Ads Query node allows the user to fetch data from their Google Ads account to build reports, analyze, and share highlights.
+    The Google Ads Query node allows the user to fetch data from their Google Ads account to build reports,
+    analyze, and share highlights.
 
     **Configuration and Usage**
 
@@ -122,18 +122,25 @@ class GoogleAdsQuery:
 
     1. **Pre-built Queries**
 
-        - These queries mirror the reports in the Google Ads dashboard, allowing you to quickly import your data into the KNIME Analytics Platform.
+        - These queries mirror the reports in the Google Ads dashboard, allowing you to quickly import your
+          data into the KNIME Analytics Platform.
         - For example, the _Search Terms_ report can be fine-tuned for different time ranges.
 
     2. **Custom Queries**
 
-        - If you are comfortable with SQL, you can use the custom mode to leverage the Google Ads Query Language (GAQL) to fetch your data.
-        - This mode is versatile and gives greater control over the data you retrieve. For more information, refer to the [Google Ads Query Language Guide](https://developers.google.com/google-ads/api/docs/query/overview).
-        - Additionally, you can validate your queries to ensure they are correct. Refer to the [Query Validation Guide]({QUERY_VALIDATOR_URL}).
+        - If you are comfortable with SQL, you can use the custom mode to leverage the Google Ads Query
+          Language (GAQL) to fetch your data.
+        - This mode is versatile and gives greater control over the data you retrieve. For more information,
+          refer to the [Google Ads Query Language Guide](https://developers.google.com/google-ads/api/docs/query/overview).
+        - Additionally, you can validate your queries to ensure they are correct.
+          Copy and paste this link into your browser:
+          https://developers.google.com/google-ads/api/fields/v<YOUR-API-VERSION>/query_validator
+          (Replace <YOUR-API-VERSION> in the URL with the version you are using, e.g., v20.)
 
     **Advanced Settings**
 
-    - You can increase the timeout for large queries by **unhiding** the advanced settings and adjusting the timeout value accordingly.
+    - You can increase the timeout for large queries by **unhiding** the advanced settings and adjusting the
+      timeout value accordingly.
 
     **Mandatory Upstream Node**
 
@@ -141,7 +148,7 @@ class GoogleAdsQuery:
 
     **Output**
 
-    - *The output port outputs the fetched data for further processing or analysis in KNIME Analytics Platform.
+    - The output port outputs the fetched data for further processing or analysis in KNIME Analytics Platform.
     """
 
     query_mode = knext.EnumParameter(
@@ -206,7 +213,11 @@ class GoogleAdsQuery:
 
     custom_timeout = knext.IntParameter(
         label="Timeout (seconds)",
-        description='When making a request, you can set a "timeout" parameter to specify a client-side response deadline in seconds. If you don\'t set it, the default timeout for the Google Ads API SearchStream method is five minutes.',
+        description=(
+            'When making a request, you can set a "timeout" parameter to specify a client-side response deadline '
+            "in seconds. If you don't set it, the default timeout for the Google Ads API SearchStream method is "
+            "five minutes."
+        ),
         default_value=300,
         min_value=1,
         is_advanced=True,
@@ -365,6 +376,3 @@ class GoogleAdsQuery:
         elif self.query_mode == "PREBUILT":
             query = pb_queries.get_query(self.query_prebuilt_name, self.date_start_query, self.date_end_query)
         return query
-
-
-GoogleAdsQuery.__doc__ = GoogleAdsQuery.__doc__.format(QUERY_VALIDATOR_URL=QUERY_VALIDATOR_URL)
