@@ -58,16 +58,21 @@ from util.common import (
     google_ad_port_type,
 )
 import util.pre_built_ad_queries as pb_queries
-from google.ads.googleads.v18.services.services.google_ads_service.client import (
-    GoogleAdsServiceClient,
-)
 from google.ads.googleads.errors import GoogleAdsException
 
-from google.ads.googleads.v18.services.types.google_ads_service import GoogleAdsRow
 from google.protobuf.internal.containers import RepeatedScalarFieldContainer
 from google.protobuf.pyext import _message
 import util.utils as utils
 import util.geo_target_queries as geo_queries
+from util.google_ads_version import GOOGLE_ADS_API_VERSION
+import importlib
+
+# Dynamically import the GoogleAdsRow type based on the API version
+# This allows the code to adapt to different versions of the Google Ads API without hardcoding the version.
+google_ads_types_module = importlib.import_module(
+    f"google.ads.googleads.{GOOGLE_ADS_API_VERSION}.services.types.google_ads_service"
+)
+GoogleAdsRow = getattr(google_ads_types_module, "GoogleAdsRow")
 
 LOGGER = logging.getLogger(__name__)
 
@@ -181,7 +186,6 @@ class GoogleAdsGeoTargets:
 
         primary_query = geo_queries.get_country_type_query(self.country_selection, self.target_type)
 
-        ga_service: GoogleAdsServiceClient
         ga_service = client.get_service("GoogleAdsService")
 
         search_request = client.get_type("SearchGoogleAdsStreamRequest")

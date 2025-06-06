@@ -52,32 +52,24 @@ from util.common import (
     google_ad_port_type,
 )
 from google.ads.googleads.client import GoogleAdsClient
-from google.ads.googleads.v18.services.services.google_ads_service.client import (
-    GoogleAdsServiceClient,
-)
-from google.ads.googleads.v18.services.services.keyword_plan_idea_service.client import (
-    KeywordPlanIdeaServiceClient,
-)
-from google.ads.googleads.v18.services.services.geo_target_constant_service.client import (
-    GeoTargetConstantServiceClient,
-)
-from google.ads.googleads.v18.services.types.keyword_plan_idea_service import (
-    GenerateKeywordIdeasRequest,
-)
-from google.ads.googleads.v18.enums.types.keyword_plan_competition_level import (
-    KeywordPlanCompetitionLevelEnum,
-)
-from google.ads.googleads.v18.enums.types.keyword_plan_network import (
-    KeywordPlanNetworkEnum,
-)
 from datetime import date, datetime
 from dateutil.relativedelta import relativedelta
-from google.ads.googleads.errors import GoogleAdsException
-
 import util.keyword_ideas_utils as keyword_ideas_utils
 from util.utils import check_column, pick_default_column, create_type_filer
-import numpy as np
+from util.google_ads_version import GOOGLE_ADS_API_VERSION
+import importlib
 
+# Importing the necessary enums from the Google Ads API versioned modules
+# The enums are dynamically imported based on the GOOGLE_ADS_API_VERSION.
+# This allows for flexibility in case the API version changes.
+
+keyword_plan_competition_level_enum_module = importlib.import_module(
+    f"google.ads.googleads.{GOOGLE_ADS_API_VERSION}.enums.types.keyword_plan_competition_level"
+)
+KeywordPlanCompetitionLevelEnum = getattr(keyword_plan_competition_level_enum_module, "KeywordPlanCompetitionLevelEnum")
+HISTORICAL_METRICS_OPTIONS_URL = (
+    f"https://developers.google.com/google-ads/api/reference/rpc/v{GOOGLE_ADS_API_VERSION}/HistoricalMetricsOptions"
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -199,7 +191,8 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
     thirteen_months_ago = date.today() - relativedelta(months=13)
     default_start_value = thirteen_months_ago.replace(day=1)
 
-    # Here is the website with the reference for the managing the dates in the Google Ads API: https://developers.google.com/google-ads/api/reference/rpc/v18/HistoricalMetricsOptions
+    # Here is the website with the reference for managing the dates in the Google Ads API:
+    # {HISTORICAL_METRICS_OPTIONS_URL}
     date_start = knext.DateTimeParameter(
         label="Start date",
         description="Define the start date for the keywords historical metrics. The default is 13 months ago from the current date. The maximum date range is 4 years.",
@@ -336,7 +329,6 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
         client = port_object.client
         account_id = port_object.spec.account_id
 
-        keyword_plan_idea_service: KeywordPlanIdeaServiceClient
         keyword_plan_idea_service = client.get_service("KeywordPlanIdeaService")
 
         # This is a system for measuring a keyword's level of competition in ad placement.
@@ -344,18 +336,13 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
         # The level can vary depending on location and Search Network targeting options.
         # UNSPECIFIED = 0;UNKNOWN = 1;LOW = 2;MEDIUM = 3;HIGH = 4
 
-        keyword_competition_level_enum: KeywordPlanCompetitionLevelEnum
-        keyword_competition_level_enum = client.enums.KeywordPlanCompetitionLevelEnum
+        keyword_competition_level_enum = KeywordPlanCompetitionLevelEnum
 
         # Container for enumeration of keyword plan forecastable network types
-        keyword_plan_network: KeywordPlanNetworkEnum
-        keyword_plan_network = client.enums.KeywordPlanNetworkEnum.GOOGLE_SEARCH_AND_PARTNERS
-
-        # List the location IDs
+        keyword_plan_network = client.enums.KeywordPlanNetworkEnum.GOOGLE_SEARCH_AND_PARTNERS  # type: ignore List the location IDs
         location_rns = keyword_ideas_utils.map_locations_ids_to_resource_names(client, location_ids_list)
 
         # Returns a fully-qualified language_constant string.
-        language_rn_get_service: GoogleAdsServiceClient
         language_rn_get_service = client.get_service("GoogleAdsService")
         language_rn = language_rn_get_service.language_constant_path(language_id)
 

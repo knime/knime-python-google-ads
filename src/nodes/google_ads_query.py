@@ -46,6 +46,9 @@ import logging
 import knime.extension as knext
 import google_ads_ext
 import pandas as pd
+import importlib
+from util.google_ads_version import GOOGLE_ADS_API_VERSION
+
 from google.ads.googleads.client import GoogleAdsClient
 from util.common import (
     GoogleAdObjectSpec,
@@ -53,18 +56,25 @@ from util.common import (
     google_ad_port_type,
 )
 import util.pre_built_ad_queries as pb_queries
-from google.ads.googleads.v18.services.services.google_ads_service.client import (
-    GoogleAdsServiceClient,
-)
 from google.ads.googleads.errors import GoogleAdsException
 
-from google.ads.googleads.v18 import enums as google_ads_enums
-from google.ads.googleads.v18.services.types.google_ads_service import GoogleAdsRow
 from google.protobuf.internal.containers import RepeatedScalarFieldContainer
 from google.protobuf.pyext import _message
 import util.utils as utils
 
 
+# Dynamically import the GoogleAdsRow type based on the API version
+# This allows the code to adapt to different versions of the Google Ads API without hardcoding the version.
+google_ads_types_module = importlib.import_module(
+    f"google.ads.googleads.{GOOGLE_ADS_API_VERSION}.services.types.google_ads_service"
+)
+GoogleAdsRow = getattr(google_ads_types_module, "GoogleAdsRow")
+
+QUERY_VALIDATOR_URL = f"https://developers.google.com/google-ads/api/fields/{GOOGLE_ADS_API_VERSION}/query_validator"
+
+QUERY_BUILDER_URL = (
+    f"https://developers.google.com/google-ads/api/fields/{GOOGLE_ADS_API_VERSION}/overview_query_builder"
+)
 LOGGER = logging.getLogger(__name__)
 
 
@@ -77,8 +87,8 @@ class QueryBuilderMode(knext.EnumParameterOptions):
 
     MANUALLY = (
         "Custom",
-        "Build your query using [Google Ads Query Builder](https://developers.google.com/google-ads/api/fields/v12/overview_query_builder),"
-        "then validate it with [Google Ads Query Validator](https://developers.google.com/google-ads/api/fields/v12/query_validator) for desired results.",
+        f"Build your query using [Google Ads Query Builder]({QUERY_BUILDER_URL}), "
+        f"then validate it with [Google Ads Query Validator]({QUERY_VALIDATOR_URL}) for desired results.",
     )
 
 
@@ -104,7 +114,6 @@ class QueryBuilderMode(knext.EnumParameterOptions):
 @knext.output_table(name="Output Data", description="KNIME table with query results")
 class GoogleAdsQuery:
     """
-
     The Google Ads Query node allows the user to fetch data from their Google Ads account to build reports, analyze, and share highlights.
 
     **Configuration and Usage**
@@ -120,7 +129,7 @@ class GoogleAdsQuery:
 
         - If you are comfortable with SQL, you can use the custom mode to leverage the Google Ads Query Language (GAQL) to fetch your data.
         - This mode is versatile and gives greater control over the data you retrieve. For more information, refer to the [Google Ads Query Language Guide](https://developers.google.com/google-ads/api/docs/query/overview).
-        - Additionally, you can validate your queries to ensure they are correct. Refer to the [Query Validation Guide](https://developers.google.com/google-ads/api/fields/v18/query_validator).
+        - Additionally, you can validate your queries to ensure they are correct. Refer to the [Query Validation Guide]({QUERY_VALIDATOR_URL}).
 
     **Advanced Settings**
 
@@ -240,7 +249,6 @@ class GoogleAdsQuery:
             exec_context.set_warning("Used default query because you didn't provide one.")
             execution_query = DEFAULT_QUERY
 
-        ga_service: GoogleAdsServiceClient
         ga_service = client.get_service("GoogleAdsService")
 
         search_request = client.get_type("SearchGoogleAdsStreamRequest")
@@ -357,3 +365,6 @@ class GoogleAdsQuery:
         elif self.query_mode == "PREBUILT":
             query = pb_queries.get_query(self.query_prebuilt_name, self.date_start_query, self.date_end_query)
         return query
+
+
+GoogleAdsQuery.__doc__ = GoogleAdsQuery.__doc__.format(QUERY_VALIDATOR_URL=QUERY_VALIDATOR_URL)

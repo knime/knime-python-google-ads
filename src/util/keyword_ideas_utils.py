@@ -8,16 +8,12 @@ import time
 import random
 from itertools import (
     islice,
-    tee,
 )
 import numpy as np
 from datetime import timedelta
-from google.ads.googleads.v16.errors.types.quota_error import QuotaErrorEnum
 from google.ads.googleads.errors import GoogleAdsException
 from google.api_core.exceptions import ResourceExhausted
-from google.ads.googleads.v16.services.types.keyword_plan_idea_service import (
-    GenerateKeywordIdeasRequest,
-)
+
 from util.utils import check_canceled
 import math
 
@@ -147,9 +143,7 @@ request_timestamps = deque(maxlen=60)
 # Quota reference website: https://developers.google.com/google-ads/api/docs/best-practices/quotas#planning_services
 
 
-def exponential_backoff_retry(
-    func, max_attempts=5, initial_delay=2, max_delay=60, chunk_info=None
-):
+def exponential_backoff_retry(func, max_attempts=5, initial_delay=2, max_delay=60, chunk_info=None):
     delay = initial_delay
 
     for attempt in range(max_attempts):
@@ -162,36 +156,28 @@ def exponential_backoff_retry(
                 if time_since_last_request < 1:
                     sleep_time = 1 - time_since_last_request
                     formatted_sleep_time = format_timestamp(sleep_time)
-                    LOGGER.warning(
-                        f"Sleeping for {formatted_sleep_time} seconds due to rate limiting"
-                    )
+                    LOGGER.warning(f"Sleeping for {formatted_sleep_time} seconds due to rate limiting")
                     time.sleep(sleep_time)
 
             # Make the request and record the timestamp
             result = func()
             request_timestamps.append(time.time())
-            formatted_request_timestamps = [
-                format_timestamp(ts) for ts in request_timestamps
-            ]
+            formatted_request_timestamps = [format_timestamp(ts) for ts in request_timestamps]
             LOGGER.warning(f"Request timestamps: {formatted_request_timestamps}")
             LOGGER.warning(f"Length of request timestamps: {len(request_timestamps)}")
             return result
 
         # Catch the RESOURCE_EXHAUSTED error and retry the request
         except ResourceExhausted as ex:
-            LOGGER.warning(
-                f"ResourceExhausted exception caught for chunk {chunk_info}: {ex}"
-            )
+            LOGGER.warning(f"ResourceExhausted exception caught for chunk {chunk_info}: {ex}")
             LOGGER.warning(f"ResourceExhausted exception caught: {ex}")
             if attempt < max_attempts - 1:
                 LOGGER.warning(
-                    f"Attempt {attempt+1} failed due to RESOURCE_EXHAUSTED. Retrying in {delay} seconds..."
+                    f"Attempt {attempt + 1} failed due to RESOURCE_EXHAUSTED. Retrying in {delay} seconds..."
                 )
                 time.sleep(delay)
                 delay = min(delay * 2, max_delay)
-                delay += random.uniform(
-                    0, delay
-                )  # Add jitter to avoid thundering herd problem
+                delay += random.uniform(0, delay)  # Add jitter to avoid thundering herd problem
             else:
                 max_attempts_error_msg = "Max attempts reached, raising the exception."
                 raise knext.InvalidParametersError(max_attempts_error_msg)
@@ -218,9 +204,7 @@ def chunked(iterable, size):
 
 
 # Function to parse monthly search volumes and convert to DataFrame
-def parse_monthly_search_volumes(
-    monthly_search_volumes, keyword, iteration_id, location_ids
-):
+def parse_monthly_search_volumes(monthly_search_volumes, keyword, iteration_id, location_ids):
     rows = [
         {
             "Keyword Idea": keyword,
@@ -293,19 +277,14 @@ def generate_keywords_ideas_with_chunks(
                 year_month_range.end.year = date_end.year
                 year_month_range.end.month = date_end.month + 1
                 request.historical_metrics_options.CopyFrom(historical_metrics_options)
-                request.historical_metrics_options.include_average_cpc = (
-                    include_average_cpc
-                )
+                request.historical_metrics_options.include_average_cpc = include_average_cpc
                 request.url_seed.url = url
-                keyword_ideas_pager = keyword_plan_idea_service.generate_keyword_ideas(
-                    request=request
-                )
+                keyword_ideas_pager = keyword_plan_idea_service.generate_keyword_ideas(request=request)
                 keyword_ideas.extend(list(keyword_ideas_pager))
                 return keyword_ideas
 
             # Process each URL
             for url in keyword_texts:
-
                 # Pass chunk information and URL to the retry function
                 keyword_ideas_pager = exponential_backoff_retry(
                     lambda c=chunk, u=url: request_keyword_ideas(c, u),
@@ -321,7 +300,7 @@ def generate_keywords_ideas_with_chunks(
                 progress = iteration_id / total_chunks
                 exec_context.set_progress(
                     progress,
-                    f"We have generated  {len(all_keyword_ideas)} keyword ideas so far. More ideas \U0001F4A1 are on the way!. This process may take some time, so please be pacient.",
+                    f"We have generated  {len(all_keyword_ideas)} keyword ideas so far. More ideas \U0001f4a1 are on the way!. This process may take some time, so please be pacient.",
                 )
 
                 if len(all_keyword_ideas) >= batch_size:
@@ -360,13 +339,9 @@ def generate_keywords_ideas_with_chunks(
                 year_month_range.end.year = date_end.year
                 year_month_range.end.month = date_end.month + 1
                 request.historical_metrics_options.CopyFrom(historical_metrics_options)
-                request.historical_metrics_options.include_average_cpc = (
-                    include_average_cpc
-                )
+                request.historical_metrics_options.include_average_cpc = include_average_cpc
                 request.keyword_seed.keywords.extend(chunked_keywords)
-                keyword_ideas_pager = keyword_plan_idea_service.generate_keyword_ideas(
-                    request=request
-                )
+                keyword_ideas_pager = keyword_plan_idea_service.generate_keyword_ideas(request=request)
                 keyword_ideas.extend(list(keyword_ideas_pager))
                 return keyword_ideas
 
@@ -389,7 +364,7 @@ def generate_keywords_ideas_with_chunks(
                 progress = iteration_id / total_chunks
                 exec_context.set_progress(
                     progress,
-                    f"We have generated  {len(all_keyword_ideas)} keyword ideas so far. More ideas \U0001F4A1 are on the way!. This process may take some time, so please be pacient.",
+                    f"We have generated  {len(all_keyword_ideas)} keyword ideas so far. More ideas \U0001f4a1 are on the way!. This process may take some time, so please be pacient.",
                 )
 
                 if len(all_keyword_ideas) >= batch_size:
@@ -412,9 +387,7 @@ def generate_keywords_ideas_with_chunks(
 
     # Process any remaining keyword ideas
     if all_keyword_ideas:
-        df_batch, df_monthly_batch = process_batch(
-            all_keyword_ideas, iteration_ids, location_ids, include_average_cpc
-        )
+        df_batch, df_monthly_batch = process_batch(all_keyword_ideas, iteration_ids, location_ids, include_average_cpc)
         aggregated_data.append(df_batch)
         aggregated_monthly_volumes.append(df_monthly_batch)
 
@@ -431,7 +404,6 @@ def generate_keywords_ideas_with_chunks(
 
 
 def process_batch(all_keyword_ideas, iteration_ids, location_ids, include_average_cpc):
-
     # Create empty lists to store data
     keywords_ideas = []
     avg_monthly_searches = []
@@ -448,29 +420,18 @@ def process_batch(all_keyword_ideas, iteration_ids, location_ids, include_averag
     monthly_search_volumes_dfs = []
 
     # Extract data and populate lists
-    for idea, iteration_id, location_id in zip(
-        all_keyword_ideas, iteration_ids, location_ids
-    ):
+    for idea, iteration_id, location_id in zip(all_keyword_ideas, iteration_ids, location_ids):
         # for idea in all_keyword_ideas:
 
         keywords_ideas.append(idea.text)
         avg_monthly_searches.append(idea.keyword_idea_metrics.avg_monthly_searches)
-        competition_values.append(
-            competition_to_text(idea.keyword_idea_metrics.competition)
-        )
+        competition_values.append(competition_to_text(idea.keyword_idea_metrics.competition))
         competition_index.append(idea.keyword_idea_metrics.competition_index)
-        average_cpc_micros.append(
-            micros_to_currency(idea.keyword_idea_metrics.average_cpc_micros)
-        )
-        high_top_of_page_bid_micros.append(
-            micros_to_currency(idea.keyword_idea_metrics.high_top_of_page_bid_micros)
-        )
-        low_top_of_page_bid_micros.append(
-            micros_to_currency(idea.keyword_idea_metrics.low_top_of_page_bid_micros)
-        )
+        average_cpc_micros.append(micros_to_currency(idea.keyword_idea_metrics.average_cpc_micros))
+        high_top_of_page_bid_micros.append(micros_to_currency(idea.keyword_idea_metrics.high_top_of_page_bid_micros))
+        low_top_of_page_bid_micros.append(micros_to_currency(idea.keyword_idea_metrics.low_top_of_page_bid_micros))
         monthly_search_volumes = [
-            metrics.monthly_searches
-            for metrics in idea.keyword_idea_metrics.monthly_search_volumes
+            metrics.monthly_searches for metrics in idea.keyword_idea_metrics.monthly_search_volumes
         ]
         # Calculate the total search volume of the period
         search_volumes.append(sum(monthly_search_volumes))
@@ -567,9 +528,7 @@ def extract_first_item_if_all_chunk_numbers_are_1(chunk_parameter, df):
 
     # Check if all values in 'Chunk Number' are 1
     if chunk_parameter == 1:
-        df["Locations in Chunk"] = df["Locations in Chunk"].apply(
-            lambda x: x[0] if isinstance(x, (list, tuple)) else x
-        )
+        df["Locations in Chunk"] = df["Locations in Chunk"].apply(lambda x: x[0] if isinstance(x, (list, tuple)) else x)
 
     return df
 
@@ -621,9 +580,7 @@ def convert_missing_to_zero(data):
     # Convert missing values to 0
     for col in data:
         if isinstance(data[col][0], list):  # Check if the column contains arrays
-            data[col] = [
-                [0 if pd.isnull(item) else item for item in val] for val in data[col]
-            ]
+            data[col] = [[0 if pd.isnull(item) else item for item in val] for val in data[col]]
         else:
             data[col] = [0 if pd.isnull(val) else val for val in data[col]]
 

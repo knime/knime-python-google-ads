@@ -54,19 +54,6 @@ import google_ads_ext
 from google.ads.googleads.client import (
     GoogleAdsClient,
 )
-from google.ads.googleads.v18.services.services.google_ads_service.client import (
-    GoogleAdsServiceClient,
-)
-import pandas as pd
-from google.ads.googleads.v18.services.types.google_ads_service import (
-    GoogleAdsRow,
-)
-from google.ads.googleads.v18.services.services.customer_service.client import (
-    CustomerServiceClient,
-)
-from google.ads.googleads.v18.services.types.customer_service import (
-    ListAccessibleCustomersResponse,
-)
 from util.common import (
     GoogleAdObjectSpec,
     GoogleAdConnectionObject,
@@ -75,6 +62,17 @@ from util.common import (
 from google.ads.googleads.errors import (
     GoogleAdsException,
 )
+from util.google_ads_version import GOOGLE_ADS_API_VERSION
+import importlib
+import pandas as pd
+
+# Dynamically import the GoogleAdsRow type based on the API version
+# This allows the code to adapt to different versions of the Google Ads API without hardcoding the version.
+google_ads_types_module = importlib.import_module(
+    f"google.ads.googleads.{GOOGLE_ADS_API_VERSION}.services.types.google_ads_service"
+)
+GoogleAdsRow = getattr(google_ads_types_module, "GoogleAdsRow")
+
 
 LOGGER = logging.getLogger(__name__)
 
@@ -284,7 +282,6 @@ def get_campaigns_id(
     FROM campaign
     ORDER BY campaign.id"""
 
-    ga_service: GoogleAdsServiceClient
     ga_service = client.get_service("GoogleAdsService")
 
     search_request = client.get_type("SearchGoogleAdsStreamRequest")
@@ -351,11 +348,9 @@ def manager_customer_ids(
     client,
 ):
     # Accessing access token from input credential port via DialogCreationContext
-    customer_service: CustomerServiceClient
     customer_service = client.get_service("CustomerService")
 
     # Accessing customer IDs
-    accessible_customers: ListAccessibleCustomersResponse
     accessible_customers = customer_service.list_accessible_customers()
 
     resource_names = accessible_customers.resource_names
