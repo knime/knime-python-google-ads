@@ -338,11 +338,15 @@ class GoogleAdsQuery:
         # [END QUERY]
         ##################
 
-        inspector = pb_queries.FieldInspector(client, google_ads_enums, LOGGER)
-
-        # Mutate df in-place
+        # Instantiate the FieldInspector, which is responsible for:
+        # - Mapping enum values to human-readable strings
+        # - Converting all known "micros" fields to standard currency units
+        # - Renaming columns for user-friendliness (e.g., removing "Metrics" prefix)
+        # The process_dataframe method will mutate the DataFrame in-place.
+        inspector = pb_queries.FieldInspector(client, google_ads_enums)
         inspector.process_dataframe(df, execution_query)
 
+        # Return the processed DataFrame as a KNIME table
         return knext.Table.from_pandas(pd.DataFrame(df))
 
     def define_query(self):

@@ -1,11 +1,5 @@
 import knime.extension as knext
-import logging
 import re
-import importlib
-import pandas as pd
-
-
-Logger = logging.getLogger(__name__)
 
 
 class HardCodedQueries(knext.EnumParameterOptions):
@@ -171,25 +165,31 @@ mapping_queries = {
 
 
 class FieldInspector:
-    def __init__(self, client, enums_module, logger):
+    def __init__(self, client, enums_module):
         self.client = client
         self.enums_module = enums_module
-        self.logger = logger
         self.enum_value_map = {}  # enum_type → {int: label}
         self._column_to_field_map = {}  # human-readable column name → GAQL field
 
     def _extract_field_names(self, query: str) -> list[str]:
+        # Extracts all field names from the SELECT part of the GAQL query.
         match = re.search(r"SELECT\s+(.*?)\s+FROM", query, re.IGNORECASE | re.DOTALL)
         if not match:
             return []
         fields = match.group(1)
+
+        # Returns a list of unique field names in the format resource.field
         return list(set(re.findall(r"\b([a-z_]+(?:\.[a-z_]+)+)\b", fields)))
 
     def get_enum_types_for_fields(self, field_names: list[str]) -> dict[str, str]:
-        self.logger.warning(f"Getting enum types for fields: {field_names}")
+        """
+        For each field in field_names, queries the GoogleAdsFieldService to determine if it is an enum.
+        Returns a mapping of field name to enum type string (e.g., 'CampaignStatusEnum.CampaignStatus').
+        """
         field_service = self.client.get_service("GoogleAdsFieldService")
         result = {}
 
+        # Google Ads API allows querying up to 50 fields at a time.
         chunks = [field_names[i : i + 50] for i in range(0, len(field_names), 50)]
         for chunk in chunks:
             quoted_names = ",".join(f'"{name}"' for name in chunk)
@@ -200,104 +200,147 @@ class FieldInspector:
             try:
                 response = field_service.search_google_ads_fields(request=request)
                 for field in response:
-                    self.logger.warning(f"Field '{field.name}' has data_type: {field.data_type}")
+                    # data_type == 5 indicates ENUM type
                     if field.data_type == 5:  # ENUM
                         type_url = getattr(field, "type_url", None)
                         enum_type = None
+                        # Parse the type_url to get the enum type string
                         if type_url and "enums" in type_url:
                             parts = type_url.split(".")
                             if len(parts) >= 2:
                                 enum_type = f"{parts[-2]}.{parts[-1]}"
 
                         if enum_type:
-                            self.logger.warning(f"Enum type for field '{field.name}': {enum_type}")
                             result[field.name] = enum_type
-            except Exception as e:
-                self.logger.warning(f"Failed to query enum types: {e}")
+            except Exception:
+                # If the API call fails, skip and continue
+                pass
 
         return result
 
     def _resolve_enum_class(self, dotted_name: str):
-        obj = self.client.enums
-        self.logger.warning(f"[Resolver] Starting at: client.enums")
+        """
+        Resolves a dotted enum type name (e.g., 'CampaignStatusEnum.CampaignStatus')
+        to the actual enum class using the client enums module.
+        """
 
+        obj = self.client.enums
         for part in dotted_name.split("."):
-            self.logger.warning(f"[Resolver] Traversing: '{part}' on {obj}")
             obj = getattr(obj, part)
 
-        self.logger.warning(f"[Resolver] Final resolved enum class: {obj}")
         return obj
 
     def _load_enum_mapping(self, enum_type_name: str) -> dict[int, str]:
+        """
+        Loads and caches a mapping from enum integer values to human-readable strings
+        for a given enum type.
+        """
         if enum_type_name in self.enum_value_map:
-            self.logger.warning(f"[Loader] Cache hit for '{enum_type_name}'")
             return self.enum_value_map[enum_type_name]
 
         try:
-            self.logger.warning(f"[Loader] Resolving enum class for '{enum_type_name}'")
             enum_class = self._resolve_enum_class(enum_type_name)
-
-            self.logger.warning(f"[Loader] Enum class keys: {list(enum_class.keys())}")
-
+            # Convert enum keys to title case strings for user-friendly display
             mapping = {value: name.replace("_", " ").title() for name, value in enum_class.items()}
-
-            self.logger.warning(f"[Loader] Final mapping: {mapping}")
             self.enum_value_map[enum_type_name] = mapping
             return mapping
 
-        except Exception as e:
-            self.logger.warning(f"[Loader] Failed to load enum mapping for '{enum_type_name}': {e}")
+        except Exception:
+            # If enum resolution fails, return empty mapping
             return {}
 
     def build_column_to_field_map(self, df_columns, field_names):
+        """
+        Builds a mapping from DataFrame column names (human-readable) to GAQL field names.
+        This is used to match DataFrame columns to their original GAQL fields.
+        """
         mapping = {}
         for field in field_names:
+            # Convert GAQL field name to a human-readable format (title case, spaces)
             readable = field.replace(".", " ").replace("_", " ").title()
             mapping[readable] = field
         self._column_to_field_map = mapping
-        self.logger.warning(f"Column to GAQL field map: {self._column_to_field_map}")
 
     def process_dataframe(self, df, gaql_query: str) -> None:
+        """
+        Main entry point for processing the DataFrame:
+        - Extracts field names from the GAQL query.
+        - Determines which fields are enums and loads their mappings.
+        - Replaces enum values in the DataFrame with human-readable strings.
+        - Renames columns and converts micros fields to standard units.
+        """
         field_names = self._extract_field_names(gaql_query)
-        self.logger.warning(f"Extracted field names from GAQL: {field_names}")
         enum_field_map = self.get_enum_types_for_fields(field_names)
-        self.logger.warning(f"Enum field map: {enum_field_map}")
-
         self.build_column_to_field_map(df.columns, field_names)
 
         for col in df.columns:
             gaql_field = self._column_to_field_map.get(col)
             enum_type = enum_field_map.get(gaql_field)
-            self.logger.warning(f"Checking column '{col}' → GAQL field: '{gaql_field}' → enum: {enum_type}")
+            # If the column corresponds to an enum field, replace its values
 
             if enum_type:
                 value_map = self._load_enum_mapping(enum_type)
-                self.logger.warning(f"Enum value map for '{col}': {value_map}")
                 if value_map:
                     try:
                         df[col] = df[col].map(value_map).fillna(df[col])
-                        self.logger.warning(f"Replaced enum values in column: '{col}'")
                     except Exception as e:
-                        self.logger.warning(f"Failed to map enum values for '{col}': {e}")
-                else:
-                    self.logger.warning(f"No enum values matched for column: '{col}' — values unchanged.")
+                        # If mapping fails, leave values unchanged
+                        pass
+
+        # After processing enums, handle column renaming and micros conversion
+        self.rename_columns(df)
 
     def rename_columns(self, df):
+        """
+        Renames columns for user-friendliness and converts known micros fields to standard units.
+        - Strips 'Metrics ' prefix from column names.
+        - Converts known micros fields (from hardcoded list) by dividing by 1,000,000.
+        - Renames columns to remove 'micros' suffix and extra spaces.
+        """
         rename_map = {}
+
+        # NOTE: There is no programmatic way to detect "micros" fields from the Google Ads API metadata.
+        # The API does not provide a flag or attribute indicating if a field is returned in micros.
+        # Therefore, we use a hardcoded list of known micros fields based on the official documentation:
+        # https://developers.google.com/google-ads/api/fields/v20/metrics
+        micros_fields = {
+            "average_cpc",
+            "average_cpm",
+            "average_cpv",
+            "average_cpa",
+            "cost_per_all_conversions",
+            "cost_per_conversion",
+            "cost_per_current_model_attributed_conversion",
+            "cost_micros",
+            "amount_micros",
+            "budget_micros",
+            "target_cpa_micros",
+            "target_cpm_micros",
+            "target_roas_micros",
+            "value_per_all_conversions",
+            "value_per_conversion",
+            # Add more as needed from the API docs
+        }
+
         for col in df.columns:
             new_col = col
-            if col.lower().endswith("micros") and df[col].dtype in ("int64", "float64"):
+            # Remove 'Metrics ' prefix before normalization
+            col_no_prefix = re.sub(r"^\s*metrics\s+", "", col, flags=re.IGNORECASE)
+            col_norm = col_no_prefix.lower().replace(" ", "_")
+
+            # Convert micros fields (by suffix or known field name)
+            if (col_norm.endswith("micros") or col_norm in micros_fields) and df[col].dtype in (
+                "int64",
+                "float64",
+                "double",
+            ):
                 df[col] = df[col] / 1_000_000
-                new_col = new_col.replace("Micros", "").replace("micros", "").strip()
-                self.logger.warning(f"Converted micros field '{col}' to '{new_col}'")
+                new_col = re.sub(r"(?i)micros$", "", new_col).strip()
 
-            if new_col.startswith("Metrics "):
-                new_col = new_col.replace("Metrics ", "", 1).strip()
-                self.logger.warning(f"Renamed column '{col}' to '{new_col}'")
-
+            # Remove 'Metrics ' prefix (case-insensitive, ignore leading spaces)
+            new_col = re.sub(r"^\s*metrics\s+", "", new_col, flags=re.IGNORECASE).strip()
             if new_col != col:
                 rename_map[col] = new_col
 
         if rename_map:
             df.rename(columns=rename_map, inplace=True)
-            self.logger.warning(f"Applied column renaming: {rename_map}")
