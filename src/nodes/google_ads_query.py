@@ -70,6 +70,10 @@ google_ads_types_module = importlib.import_module(
 )
 GoogleAdsRow = getattr(google_ads_types_module, "GoogleAdsRow")
 
+# Dynamically import the enums module based on the API version
+# This allows the code to adapt to different versions of the Google Ads API without hardcoding the version.
+google_ads_enums = importlib.import_module(f"google.ads.googleads.{GOOGLE_ADS_API_VERSION}.enums")
+
 QUERY_VALIDATOR_URL = f"https://developers.google.com/google-ads/api/fields/{GOOGLE_ADS_API_VERSION}/query_validator"
 QUERY_BUILDER_URL = (
     f"https://developers.google.com/google-ads/api/fields/{GOOGLE_ADS_API_VERSION}/overview_query_builder"
