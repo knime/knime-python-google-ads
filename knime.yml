@@ -1,6 +1,6 @@
 name: google_ads_ext
 author: Diego Rodríguez, Steffen Fissler, Tobias Koetter
-env_yml_path: conda_env.yml
+pixi_toml_path: pixi.toml
 extension_module: src/google_ads_ext
 description: KNIME Nodes for Google Ads (Labs)
 group_id: org.knime.python

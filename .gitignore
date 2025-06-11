@@ -53,3 +53,7 @@ Thumbs.db
 
 #Users personal config files based on the config.yml file e.g. config_tobi.yml
 config_*.yml
+
+# pixi environments
+.pixi
+*.egg-info
