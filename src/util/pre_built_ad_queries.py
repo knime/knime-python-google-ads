@@ -166,6 +166,18 @@ mapping_queries = {
 
 class FieldInspector:
     def __init__(self, client, enums_module):
+        """
+        Initialize the FieldInspector.
+
+        Args:
+            client: An instance of the Google Ads API client, used to access Google Ads services and metadata.
+            enums_module: The enums module for the current Google Ads API version, used for resolving enum types.
+
+        This constructor sets up the internal state for field and enum inspection, including:
+        - Storing references to the client and enums module.
+        - Initializing a cache for enum value mappings.
+        - Initializing the column-to-field mapping, which links DataFrame columns to GAQL fields.
+        """
         self.client = client
         self.enums_module = enums_module
         self.enum_value_map = {}  # enum_type → {int: label}
@@ -275,6 +287,9 @@ class FieldInspector:
 
         for col in df.columns:
             gaql_field = self._column_to_field_map.get(col)
+            if gaql_field is None:
+                # If the column does not correspond to a GAQL field, skip it
+                continue
             enum_type = enum_field_map.get(gaql_field)
             # If the column corresponds to an enum field, replace its values
 
@@ -283,7 +298,7 @@ class FieldInspector:
                 if value_map:
                     try:
                         df[col] = df[col].map(value_map).fillna(df[col])
-                    except Exception as e:
+                    except Exception as _:
                         # If mapping fails, leave values unchanged
                         pass
 
