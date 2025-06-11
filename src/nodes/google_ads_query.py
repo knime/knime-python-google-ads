@@ -117,6 +117,7 @@ class QueryBuilderMode(knext.EnumParameterOptions):
 @knext.output_table(name="Output Data", description="KNIME table with query results")
 class GoogleAdsQuery:
     """
+
     The Google Ads Query node allows the user to fetch data from their Google Ads account to build reports,
     analyze, and share highlights.
 

@@ -300,7 +300,7 @@ def generate_keywords_ideas_with_chunks(
                 progress = iteration_id / total_chunks
                 exec_context.set_progress(
                     progress,
-                    f"We have generated  {len(all_keyword_ideas)} keyword ideas so far. More ideas \U0001f4a1 are on the way!. This process may take some time, so please be pacient.",
+                    f"We have generated  {len(all_keyword_ideas)} keyword ideas so far, and more ideas \U0001f4a1 are on the way! This process may take some time; please be patient.",
                 )
 
                 if len(all_keyword_ideas) >= batch_size:
