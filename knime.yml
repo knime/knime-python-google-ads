@@ -4,7 +4,7 @@ pixi_toml_path: pixi.toml
 extension_module: src/google_ads_ext
 description: KNIME Nodes for Google Ads (Labs)
 group_id: org.knime.python
-version: 5.6.0
+version: 5.6.1
 vendor: KNIME AG, Zurich, Switzerland
 license_file: LICENSE.txt
 feature_dependencies:
