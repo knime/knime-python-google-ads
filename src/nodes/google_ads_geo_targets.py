@@ -61,7 +61,7 @@ import util.pre_built_ad_queries as pb_queries
 from google.ads.googleads.errors import GoogleAdsException
 
 from google.protobuf.internal.containers import RepeatedScalarFieldContainer
-from google.protobuf.pyext import _message
+
 import util.utils as utils
 import util.geo_target_queries as geo_queries
 from util.google_ads_version import GOOGLE_ADS_API_VERSION
@@ -248,12 +248,16 @@ class GoogleAdsGeoTargets:
                                 # query-fix for AD query. Explanation for the below if: when fetching the field "final_urls" from the response_stream, it returned a [] type that was not in any Python readable type.
                                 # indeed the type was this protobuf RepeatedScalarFieldContainer. The goal of the if clause is to convert the empty list to empty strings and extract the RepeatedScalarFieldContainer( similar to list type) element
                                 # for reference https://googleapis.dev/python/protobuf/latest/google/protobuf/internal/containers.html
-                                if type(attribute_value) is _message.RepeatedScalarContainer:
-                                    attribute_value: RepeatedScalarFieldContainer
+                                # Use public protobuf container type and avoid mutating the proto (don't pop())
+
+                                if isinstance(attribute_value, RepeatedScalarFieldContainer):
                                     if len(attribute_value) == 0:
                                         attribute_value = ""
                                     else:
-                                        attribute_value = attribute_value.pop(0)
+                                        attribute_value = attribute_value[0]
+                                elif isinstance(attribute_value, (list, tuple)):
+                                    attribute_value = attribute_value[0] if attribute_value else ""
+
                             data_row.append(attribute_value)
                         data.append(data_row)
 
