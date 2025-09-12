@@ -53,6 +53,7 @@ from util.common import (
 )
 from google.ads.googleads.client import GoogleAdsClient
 from datetime import date, datetime
+from dateutil.parser import parse as parse_date
 from dateutil.relativedelta import relativedelta
 import util.keyword_ideas_utils as keyword_ideas_utils
 from util.utils import check_column, pick_default_column, create_type_filer
@@ -206,11 +207,19 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
 
     @date_start.validator
     def validate_date_start(value):
+        # Accept str, datetime, or date; normalize to date and return it
         if isinstance(value, str):
             try:
-                value = datetime.strptime(value, "%Y-%m-%dT%H:%M:%S.%fZ").date()
-            except ValueError:
-                value = datetime.strptime(value, "%Y-%m-%dZ").date()
+                value = parse_date(value).date()
+            except Exception:
+                raise ValueError(
+                    "Invalid start date format. Use ISO-like date (e.g. 2024-08-27 or 2024-08-27T00:00:00.000)."
+                )
+        elif isinstance(value, datetime):
+            value = value.date()
+        elif not isinstance(value, date):
+            raise ValueError("Start date must be a date, datetime or ISO string.")
+
         if value.month == date.today().month:
             raise ValueError(
                 "The start date cannot be set up for the current month. Please set a start date at least one month ahead."
@@ -219,6 +228,7 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
             raise ValueError(
                 "The start date cannot be set up for a date greater than four years from the current date. Please set a start date within the last four years."
             )
+        return value
 
     one_month_ago = date.today().replace(day=1) - relativedelta(months=1)
     default_end_value = one_month_ago.replace(day=1)
@@ -236,11 +246,19 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
 
     @date_end.validator
     def validate_date_end(value):
+        # Accept str, datetime, or date; normalize to date and return it
         if isinstance(value, str):
             try:
-                value = datetime.strptime(value, "%Y-%m-%dT%H:%M:%S.%fZ").date()
-            except ValueError:
-                value = datetime.strptime(value, "%Y-%m-%dZ").date()
+                value = parse_date(value).date()
+            except Exception:
+                raise ValueError(
+                    "Invalid end date format. Use ISO-like date (e.g. 2024-08-27 or 2024-08-27T00:00:00.000)."
+                )
+        elif isinstance(value, datetime):
+            value = value.date()
+        elif not isinstance(value, date):
+            raise ValueError("End date must be a date, datetime or ISO string.")
+
         if value.month == date.today().month:
             raise ValueError(
                 "The end date cannot be set up for the current month. Please set an end date at least one month ahead."
@@ -249,6 +267,7 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
             raise ValueError(
                 "The end date cannot be set up for a date greater than four years from the current date. Please set an end date within the last four years."
             )
+        return value
 
     rows_per_chunk = knext.IntParameter(
         label="Rows per Chunk",
