@@ -6,7 +6,7 @@ platforms = ["win-64", "linux-64", "osx-64", "osx-arm64"]
 
 [dependencies]
 python = "3.11.*"
-knime-python-versions = "5.7.*"
+knime-python-versions = "5.8.*"
 knime-extension = "*"
 google-ads = "27.0.0.*"
 google-api-python-client = "*"
@@ -14,7 +14,8 @@ protobuf = "*"
 
 [feature.build.dependencies]
 python = "3.9.*"
-knime-extension-bundling = "5.7.*"
+knime-extension-bundling = "5.8.*"
+jake = "*"
 
 [feature.build.tasks]
 build = { args = [{ "arg" = "dest", "default" = "./local-update-site" }], cmd = "build-python-extension . {{ dest }}"}
