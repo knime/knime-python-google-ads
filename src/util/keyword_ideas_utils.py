@@ -10,9 +10,10 @@ from itertools import (
     islice,
 )
 import numpy as np
-from datetime import timedelta
 from google.ads.googleads.errors import GoogleAdsException
 from google.api_core.exceptions import ResourceExhausted
+from datetime import date, datetime, timedelta
+from dateutil.parser import parse as parse_date
 
 from util.utils import check_canceled
 import math
@@ -549,7 +550,8 @@ def map_locations_ids_to_resource_names(port_object, location_ids):
     return [build_resource_name(location_id) for location_id in location_ids]
 
 
-# Function to use in the date_start ane date_end validators to check if the input date is greater than four years from the current date
+# Function to compute the absolute year difference between two dates.
+# Used at runtime (in execute) to ensure the chosen period does not exceed 4 years.
 def datediff_in_years(date1, date2):
     return abs(date1.year - date2.year)
 
@@ -586,6 +588,25 @@ def convert_missing_to_zero(data):
 
     df = pd.DataFrame(data)
     return df
+
+
+def ensure_date(value, name="date"):
+    """Normalize string or datetime inputs to a date object.
+    Raises ValueError if conversion fails.
+    Used by parameter validators, configure, and execute methods.
+    """
+    if isinstance(value, date) and not isinstance(value, datetime):
+        return value
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, str):
+        try:
+            return parse_date(value).date()
+        except Exception as exc:
+            raise ValueError(
+                f"Invalid {name} format: {value!r}. Use ISO-like date (e.g. 2024-08-27 or 2024-08-27T00:00:00.000)."
+            ) from exc
+    raise ValueError(f"{name.capitalize()} must be a date, datetime, or ISO string.")
 
 
 ###### END of basic methods for the google_ads_keyword_ideas node ######
