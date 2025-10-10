@@ -207,28 +207,8 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
 
     @date_start.validator
     def validate_date_start(value):
+        keyword_ideas_utils.ensure_date(value, "start date")
         # Accept str, datetime, or date; normalize to date and return it
-        if isinstance(value, str):
-            try:
-                value = parse_date(value).date()
-            except Exception:
-                raise ValueError(
-                    "Invalid start date format. Use ISO-like date (e.g. 2024-08-27 or 2024-08-27T00:00:00.000)."
-                )
-        elif isinstance(value, datetime):
-            value = value.date()
-        elif not isinstance(value, date):
-            raise ValueError("Start date must be a date, datetime or ISO string.")
-
-        if value.month == date.today().month:
-            raise ValueError(
-                "The start date cannot be set up for the current month. Please set a start date at least one month ahead."
-            )
-        elif keyword_ideas_utils.datediff_in_years(value, date.today()) > 4:
-            raise ValueError(
-                "The start date cannot be set up for a date greater than four years from the current date. Please set a start date within the last four years."
-            )
-        return value
 
     one_month_ago = date.today().replace(day=1) - relativedelta(months=1)
     default_end_value = one_month_ago.replace(day=1)
@@ -246,28 +226,8 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
 
     @date_end.validator
     def validate_date_end(value):
+        keyword_ideas_utils.ensure_date(value, "end date")
         # Accept str, datetime, or date; normalize to date and return it
-        if isinstance(value, str):
-            try:
-                value = parse_date(value).date()
-            except Exception:
-                raise ValueError(
-                    "Invalid end date format. Use ISO-like date (e.g. 2024-08-27 or 2024-08-27T00:00:00.000)."
-                )
-        elif isinstance(value, datetime):
-            value = value.date()
-        elif not isinstance(value, date):
-            raise ValueError("End date must be a date, datetime or ISO string.")
-
-        if value.month == date.today().month:
-            raise ValueError(
-                "The end date cannot be set up for the current month. Please set an end date at least one month ahead."
-            )
-        elif keyword_ideas_utils.datediff_in_years(value, date.today()) > 4:
-            raise ValueError(
-                "The end date cannot be set up for a date greater than four years from the current date. Please set an end date within the last four years."
-            )
-        return value
 
     rows_per_chunk = knext.IntParameter(
         label="Rows per Chunk",
@@ -298,11 +258,23 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
         input_table_schema: knext.Schema,
         location_table_schema: knext.Schema,
     ):
-        # TODO Properly set up the config method passing the specs of the two returned tables
-        if self.date_end < self.date_start:
-            raise ValueError(
-                "The end date cannot be set up for a date earlier than the start date. Please set an end date later than the start date."
+        """Configuration-time validation for column and date parameters.
+        Only performs checks that are timeless and structural.
+        """
+        # --- Normalize parameters to date objects for consistent comparisons ---
+        try:
+            start_date = keyword_ideas_utils.ensure_date(self.date_start, "start date")
+            end_date = keyword_ideas_utils.ensure_date(self.date_end, "end date")
+        except ValueError as e:
+            raise knext.InvalidParametersError(str(e))
+
+        # --- Cross-field (timeless) validation ---
+        if end_date < start_date:
+            raise knext.InvalidParametersError(
+                "The end date cannot be earlier than the start date. "
+                "Please select an end date later than or equal to the start date."
             )
+
         if self.keywords_column:
             check_column(input_table_schema, self.keywords_column, knext.string(), "seed data")
         else:
@@ -326,6 +298,34 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
         input_table: knext.Table,
         location_table: knext.Table,
     ) -> knext.Table:
+        # --- Normalize parameters to date objects (do not rely on validators mutating) ---
+        try:
+            start_date = keyword_ideas_utils.ensure_date(self.date_start, "start date")
+            end_date = keyword_ideas_utils.ensure_date(self.date_end, "end date")
+        except ValueError as e:
+            # Surface a friendly, user-visible error in KNIME
+            raise knext.InvalidParametersError(str(e))
+
+        # --- Time-dependent rules (checked at run time) ---
+        today = date.today()
+
+        # Block current month for start
+        if start_date.year == today.year and start_date.month == today.month:
+            raise knext.InvalidParametersError("Start date cannot be set to the current month.")
+
+        # Block current month for end
+        if end_date.year == today.year and end_date.month == today.month:
+            raise knext.InvalidParametersError("End date cannot be set to the current month.")
+
+        # Limit lookback window to last 4 years (start and end)
+        if keyword_ideas_utils.datediff_in_years(start_date, today) > 4:
+            raise knext.InvalidParametersError("Start date must be within the last four years.")
+
+        if keyword_ideas_utils.datediff_in_years(end_date, today) > 4:
+            raise knext.InvalidParametersError("End date must be within the last four years.")
+
+        # --- Parameters are now normalized and validated ---
+
         exec_context.set_warning
         # Get the language id from the language selection enumparameter
         language_id = keyword_ideas_utils.get_criterion_id(self.language_selection)
