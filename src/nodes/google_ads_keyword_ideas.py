@@ -205,11 +205,6 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
         default_value=default_start_value,
     )
 
-    @date_start.validator
-    def validate_date_start(value):
-        keyword_ideas_utils.ensure_date(value, "start date")
-        # Accept str, datetime, or date; normalize to date and return it
-
     one_month_ago = date.today().replace(day=1) - relativedelta(months=1)
     default_end_value = one_month_ago.replace(day=1)
 
@@ -223,11 +218,6 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
         show_milliseconds=False,
         default_value=default_end_value,
     )
-
-    @date_end.validator
-    def validate_date_end(value):
-        keyword_ideas_utils.ensure_date(value, "end date")
-        # Accept str, datetime, or date; normalize to date and return it
 
     rows_per_chunk = knext.IntParameter(
         label="Rows per Chunk",
