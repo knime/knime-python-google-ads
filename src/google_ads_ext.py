@@ -64,3 +64,5 @@ import nodes.google_ads_connector
 import nodes.google_ads_query
 import nodes.google_ads_keyword_ideas
 import nodes.google_ads_geo_targets
+import nodes.google_ads_mcp_tools
+import nodes.google_ads_mcp_list_tools
