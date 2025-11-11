@@ -14,7 +14,7 @@ protobuf = "*"
 
 [feature.build.dependencies]
 python = "3.9.*"
-knime-extension-bundling = "5.8.*"
+knime-extension-bundling = "5.9.*"
 jake = "*"
 
 [feature.build.tasks]
