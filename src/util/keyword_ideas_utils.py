@@ -144,7 +144,9 @@ request_timestamps = deque(maxlen=60)
 # Quota reference website: https://developers.google.com/google-ads/api/docs/best-practices/quotas#planning_services
 
 
-def exponential_backoff_retry(func, max_attempts=5, initial_delay=2, max_delay=60, chunk_info=None):
+def exponential_backoff_retry(
+    func, max_attempts=5, initial_delay=2, max_delay=60, chunk_info=None
+):
     delay = initial_delay
 
     for attempt in range(max_attempts):
@@ -157,20 +159,26 @@ def exponential_backoff_retry(func, max_attempts=5, initial_delay=2, max_delay=6
                 if time_since_last_request < 1:
                     sleep_time = 1 - time_since_last_request
                     formatted_sleep_time = format_timestamp(sleep_time)
-                    LOGGER.warning(f"Sleeping for {formatted_sleep_time} seconds due to rate limiting")
+                    LOGGER.warning(
+                        f"Sleeping for {formatted_sleep_time} seconds due to rate limiting"
+                    )
                     time.sleep(sleep_time)
 
             # Make the request and record the timestamp
             result = func()
             request_timestamps.append(time.time())
-            formatted_request_timestamps = [format_timestamp(ts) for ts in request_timestamps]
+            formatted_request_timestamps = [
+                format_timestamp(ts) for ts in request_timestamps
+            ]
             LOGGER.warning(f"Request timestamps: {formatted_request_timestamps}")
             LOGGER.warning(f"Length of request timestamps: {len(request_timestamps)}")
             return result
 
         # Catch the RESOURCE_EXHAUSTED error and retry the request
         except ResourceExhausted as ex:
-            LOGGER.warning(f"ResourceExhausted exception caught for chunk {chunk_info}: {ex}")
+            LOGGER.warning(
+                f"ResourceExhausted exception caught for chunk {chunk_info}: {ex}"
+            )
             LOGGER.warning(f"ResourceExhausted exception caught: {ex}")
             if attempt < max_attempts - 1:
                 LOGGER.warning(
@@ -178,7 +186,9 @@ def exponential_backoff_retry(func, max_attempts=5, initial_delay=2, max_delay=6
                 )
                 time.sleep(delay)
                 delay = min(delay * 2, max_delay)
-                delay += random.uniform(0, delay)  # Add jitter to avoid thundering herd problem
+                delay += random.uniform(
+                    0, delay
+                )  # Add jitter to avoid thundering herd problem
             else:
                 max_attempts_error_msg = "Max attempts reached, raising the exception."
                 raise knext.InvalidParametersError(max_attempts_error_msg)
@@ -205,7 +215,9 @@ def chunked(iterable, size):
 
 
 # Function to parse monthly search volumes and convert to DataFrame
-def parse_monthly_search_volumes(monthly_search_volumes, keyword, iteration_id, location_ids):
+def parse_monthly_search_volumes(
+    monthly_search_volumes, keyword, iteration_id, location_ids
+):
     rows = [
         {
             "Keyword Idea": keyword,
@@ -278,9 +290,13 @@ def generate_keywords_ideas_with_chunks(
                 year_month_range.end.year = date_end.year
                 year_month_range.end.month = date_end.month + 1
                 request.historical_metrics_options.CopyFrom(historical_metrics_options)
-                request.historical_metrics_options.include_average_cpc = include_average_cpc
+                request.historical_metrics_options.include_average_cpc = (
+                    include_average_cpc
+                )
                 request.url_seed.url = url
-                keyword_ideas_pager = keyword_plan_idea_service.generate_keyword_ideas(request=request)
+                keyword_ideas_pager = keyword_plan_idea_service.generate_keyword_ideas(
+                    request=request
+                )
                 keyword_ideas.extend(list(keyword_ideas_pager))
                 return keyword_ideas
 
@@ -340,9 +356,13 @@ def generate_keywords_ideas_with_chunks(
                 year_month_range.end.year = date_end.year
                 year_month_range.end.month = date_end.month + 1
                 request.historical_metrics_options.CopyFrom(historical_metrics_options)
-                request.historical_metrics_options.include_average_cpc = include_average_cpc
+                request.historical_metrics_options.include_average_cpc = (
+                    include_average_cpc
+                )
                 request.keyword_seed.keywords.extend(chunked_keywords)
-                keyword_ideas_pager = keyword_plan_idea_service.generate_keyword_ideas(request=request)
+                keyword_ideas_pager = keyword_plan_idea_service.generate_keyword_ideas(
+                    request=request
+                )
                 keyword_ideas.extend(list(keyword_ideas_pager))
                 return keyword_ideas
 
@@ -388,7 +408,9 @@ def generate_keywords_ideas_with_chunks(
 
     # Process any remaining keyword ideas
     if all_keyword_ideas:
-        df_batch, df_monthly_batch = process_batch(all_keyword_ideas, iteration_ids, location_ids, include_average_cpc)
+        df_batch, df_monthly_batch = process_batch(
+            all_keyword_ideas, iteration_ids, location_ids, include_average_cpc
+        )
         aggregated_data.append(df_batch)
         aggregated_monthly_volumes.append(df_monthly_batch)
 
@@ -421,18 +443,29 @@ def process_batch(all_keyword_ideas, iteration_ids, location_ids, include_averag
     monthly_search_volumes_dfs = []
 
     # Extract data and populate lists
-    for idea, iteration_id, location_id in zip(all_keyword_ideas, iteration_ids, location_ids):
+    for idea, iteration_id, location_id in zip(
+        all_keyword_ideas, iteration_ids, location_ids
+    ):
         # for idea in all_keyword_ideas:
 
         keywords_ideas.append(idea.text)
         avg_monthly_searches.append(idea.keyword_idea_metrics.avg_monthly_searches)
-        competition_values.append(competition_to_text(idea.keyword_idea_metrics.competition))
+        competition_values.append(
+            competition_to_text(idea.keyword_idea_metrics.competition)
+        )
         competition_index.append(idea.keyword_idea_metrics.competition_index)
-        average_cpc_micros.append(micros_to_currency(idea.keyword_idea_metrics.average_cpc_micros))
-        high_top_of_page_bid_micros.append(micros_to_currency(idea.keyword_idea_metrics.high_top_of_page_bid_micros))
-        low_top_of_page_bid_micros.append(micros_to_currency(idea.keyword_idea_metrics.low_top_of_page_bid_micros))
+        average_cpc_micros.append(
+            micros_to_currency(idea.keyword_idea_metrics.average_cpc_micros)
+        )
+        high_top_of_page_bid_micros.append(
+            micros_to_currency(idea.keyword_idea_metrics.high_top_of_page_bid_micros)
+        )
+        low_top_of_page_bid_micros.append(
+            micros_to_currency(idea.keyword_idea_metrics.low_top_of_page_bid_micros)
+        )
         monthly_search_volumes = [
-            metrics.monthly_searches for metrics in idea.keyword_idea_metrics.monthly_search_volumes
+            metrics.monthly_searches
+            for metrics in idea.keyword_idea_metrics.monthly_search_volumes
         ]
         # Calculate the total search volume of the period
         search_volumes.append(sum(monthly_search_volumes))
@@ -448,24 +481,40 @@ def process_batch(all_keyword_ideas, iteration_ids, location_ids, include_averag
         monthly_search_volumes_dfs.append(monthly_df)
 
         # Calculate the seasonality of the search volumes
-        if not monthly_search_volumes:
+        if not monthly_search_volumes or len(monthly_search_volumes) < 2:
             adjusted_seasonality = None
         else:
             # Calculate trend line using linear regression
             x = np.arange(len(monthly_search_volumes))
-            y = monthly_search_volumes
-            coefficients = np.polyfit(x, y, 1)
-            trend_line = np.polyval(coefficients, x)
+            y = np.array(monthly_search_volumes, dtype=float)
 
-            # Calculate residuals
-            residuals = y - trend_line
+            # Check if all values are the same or if we have numerical issues
+            if len(set(y)) <= 1 or np.all(y == 0):
+                # All values are identical or all zeros - no seasonality to calculate
+                adjusted_seasonality = 0.0
+            else:
+                try:
+                    coefficients = np.polyfit(x, y, 1)
+                    trend_line = np.polyval(coefficients, x)
 
-            # Calculate standard deviation of residuals
-            std_dev = np.std(residuals)
+                    # Calculate residuals
+                    residuals = y - trend_line
 
-            # Adjust seasonality
-            avg_search_volume = np.mean(monthly_search_volumes)
-            adjusted_seasonality = std_dev / avg_search_volume
+                    # Calculate standard deviation of residuals
+                    std_dev = np.std(residuals)
+
+                    # Adjust seasonality
+                    avg_search_volume = np.mean(y)
+                    if avg_search_volume != 0:
+                        adjusted_seasonality = std_dev / avg_search_volume
+                    else:
+                        adjusted_seasonality = 0.0
+                except (np.linalg.LinAlgError, ValueError) as e:
+                    # Handle numerical issues gracefully
+                    LOGGER.warning(
+                        f"Could not calculate seasonality for keyword data: {e}"
+                    )
+                    adjusted_seasonality = None
         seasonality.append(adjusted_seasonality)
 
     # Create a DataFrame from the lists and include the iteration ID
@@ -501,7 +550,7 @@ def process_batch(all_keyword_ideas, iteration_ids, location_ids, include_averag
     df = pd.DataFrame(convert_missing_to_zero(data))
 
     # Drop the average CPC column if the user does not want to include it
-    if include_average_cpc == False:
+    if not include_average_cpc:
         df = df.drop(columns=["Average Cost per Click"])
 
     # Dataframe with the monthly search volumes for the second output table
@@ -529,7 +578,9 @@ def extract_first_item_if_all_chunk_numbers_are_1(chunk_parameter, df):
 
     # Check if all values in 'Chunk Number' are 1
     if chunk_parameter == 1:
-        df["Locations in Chunk"] = df["Locations in Chunk"].apply(lambda x: x[0] if isinstance(x, (list, tuple)) else x)
+        df["Locations in Chunk"] = df["Locations in Chunk"].apply(
+            lambda x: x[0] if isinstance(x, (list, tuple)) else x
+        )
 
     return df
 
@@ -582,7 +633,9 @@ def convert_missing_to_zero(data):
     # Convert missing values to 0
     for col in data:
         if isinstance(data[col][0], list):  # Check if the column contains arrays
-            data[col] = [[0 if pd.isnull(item) else item for item in val] for val in data[col]]
+            data[col] = [
+                [0 if pd.isnull(item) else item for item in val] for val in data[col]
+            ]
         else:
             data[col] = [0 if pd.isnull(val) else val for val in data[col]]
 
