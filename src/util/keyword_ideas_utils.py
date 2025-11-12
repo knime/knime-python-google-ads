@@ -58,6 +58,77 @@ def get_criterion_id(language_name):
     return language_name_to_criterion_id.get(language_name, "Language name not found")
 
 
+class _LanguageSelectionParameter(knext.StringParameter):
+    """Custom parameter implementation that maps enum names to their display names
+    and supports case-insensitive flow variables.
+
+    This allows backwards compatibility and flexible input while maintaining
+    a dropdown-like experience for users.
+    """
+
+    def __init__(
+        self, label=None, description=None, default_value="", options=None, **kwargs
+    ):
+        # Get choices from the enum options
+        if options:
+            choices = [
+                knext.StringParameter.Choice(
+                    member.value[0],
+                    member.value[0],
+                    member.value[1],  # Use display name as both value and label
+                )
+                for member in options.__members__.values()
+            ]
+        else:
+            choices = None
+
+        super().__init__(
+            label=label,
+            description=description,
+            default_value=default_value,
+            choices=choices,
+            **kwargs,
+        )
+        self._options = options
+
+    def _set_value(self, obj, value, name, exclude_validations=None):
+        """Map enum names to display values and handle case-insensitive input."""
+        if self._options and value:
+            value_upper = value.upper()
+
+            # Check if input matches any enum member name (e.g., "spanish" -> "SPANISH")
+            if value_upper in self._options.__members__:
+                # Convert enum member name to display value
+                display_value = self._options[value_upper].value[0]
+                return super()._set_value(obj, display_value, name)
+
+        # No match found - but don't raise error during configuration
+        # Let the StringParameter handle validation (it will allow invalid values to be set)
+        return super()._set_value(obj, value, name)
+
+    def validate_for_execution(self, value):
+        """Validate the language value at execution time and provide helpful error message."""
+        if not self._options or not value:
+            return value
+
+        value_upper = value.upper()
+
+        # Check if input matches any enum member name
+        if value_upper in self._options.__members__:
+            return self._options[value_upper].value[0]
+
+        # No match found - generate helpful error message
+        available_languages = []
+        for member in self._options.__members__.values():
+            available_languages.append(f"'{member.value[0]}'")
+        available_list = ", ".join(sorted(available_languages))
+
+        raise knext.InvalidParametersError(
+            f"Language '{value}' is not supported. "
+            f"Available languages are: {available_list}"
+        )
+
+
 # Enum options for the language selection
 class LanguageSelection(knext.EnumParameterOptions):
     """

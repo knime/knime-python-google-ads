@@ -67,10 +67,10 @@ import importlib
 keyword_plan_competition_level_enum_module = importlib.import_module(
     f"google.ads.googleads.{GOOGLE_ADS_API_VERSION}.enums.types.keyword_plan_competition_level"
 )
-KeywordPlanCompetitionLevelEnum = getattr(keyword_plan_competition_level_enum_module, "KeywordPlanCompetitionLevelEnum")
-HISTORICAL_METRICS_OPTIONS_URL = (
-    f"https://developers.google.com/google-ads/api/reference/rpc/v{GOOGLE_ADS_API_VERSION}/HistoricalMetricsOptions"
+KeywordPlanCompetitionLevelEnum = getattr(
+    keyword_plan_competition_level_enum_module, "KeywordPlanCompetitionLevelEnum"
 )
+HISTORICAL_METRICS_OPTIONS_URL = f"https://developers.google.com/google-ads/api/reference/rpc/v{GOOGLE_ADS_API_VERSION}/HistoricalMetricsOptions"
 
 LOGGER = logging.getLogger(__name__)
 
@@ -177,14 +177,14 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
         since_version=None,
         column_filter=create_type_filer(knext.int64()),
     )
-    # Select language parameter group hardcoded from the CSV in the data folder and built as class (EnumParameterOptions) in the data_utils.py file.
-
-    language_selection = knext.EnumParameter(
+    # Select language parameter - custom implementation supporting case-insensitive flow variables
+    language_selection = keyword_ideas_utils._LanguageSelectionParameter(
         label="Language",
-        description="Select the language to target.",
-        default_value=keyword_ideas_utils.LanguageSelection.ENGLISH.name,
-        enum=keyword_ideas_utils.LanguageSelection,
-        style=knext.EnumParameter.Style.DROPDOWN,
+        description="Select the language to target. Accepts case-insensitive values like 'Spanish', 'SPANISH', or 'spanish'.",
+        default_value=keyword_ideas_utils.LanguageSelection.ENGLISH.value[
+            0
+        ],  # Use display name "English"
+        options=keyword_ideas_utils.LanguageSelection,
     )
 
     # Default value for the start date is thirteen months ago from the current date, because by default the historical metrics are set up for the last twelve (not including the current one) months.
@@ -266,9 +266,13 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
             )
 
         if self.keywords_column:
-            check_column(input_table_schema, self.keywords_column, knext.string(), "seed data")
+            check_column(
+                input_table_schema, self.keywords_column, knext.string(), "seed data"
+            )
         else:
-            self.keywords_column = pick_default_column(input_table_schema, knext.string())
+            self.keywords_column = pick_default_column(
+                input_table_schema, knext.string()
+            )
 
         if self.locations_column:
             check_column(
@@ -278,7 +282,9 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
                 "location IDs",
             )
         else:
-            self.locations_column = pick_default_column(location_table_schema, knext.int64())
+            self.locations_column = pick_default_column(
+                location_table_schema, knext.int64()
+            )
         return None, None
 
     def execute(
@@ -301,24 +307,38 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
 
         # Block current month for start
         if start_date.year == today.year and start_date.month == today.month:
-            raise knext.InvalidParametersError("Start date cannot be set to the current month.")
+            raise knext.InvalidParametersError(
+                "Start date cannot be set to the current month."
+            )
 
         # Block current month for end
         if end_date.year == today.year and end_date.month == today.month:
-            raise knext.InvalidParametersError("End date cannot be set to the current month.")
+            raise knext.InvalidParametersError(
+                "End date cannot be set to the current month."
+            )
 
         # Limit lookback window to last 4 years (start and end)
         if keyword_ideas_utils.datediff_in_years(start_date, today) > 4:
-            raise knext.InvalidParametersError("Start date must be within the last four years.")
+            raise knext.InvalidParametersError(
+                "Start date must be within the last four years."
+            )
 
         if keyword_ideas_utils.datediff_in_years(end_date, today) > 4:
-            raise knext.InvalidParametersError("End date must be within the last four years.")
+            raise knext.InvalidParametersError(
+                "End date must be within the last four years."
+            )
 
         # --- Parameters are now normalized and validated ---
 
-        exec_context.set_warning
-        # Get the language id from the language selection enumparameter
-        language_id = keyword_ideas_utils.get_criterion_id(self.language_selection)
+        # Validate and get the language name (with helpful error message if invalid)
+        # Access the parameter descriptor to call validation method
+        language_param = type(self).__dict__["language_selection"]
+        validated_language = language_param.validate_for_execution(
+            self.language_selection
+        )
+
+        # Get the language id from the validated language selection
+        language_id = keyword_ideas_utils.get_criterion_id(validated_language)
 
         # Get the location IDs from the location table
         location_ids_column = location_table.to_pandas()
@@ -348,8 +368,12 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
         keyword_competition_level_enum = KeywordPlanCompetitionLevelEnum
 
         # Container for enumeration of keyword plan forecastable network types
-        keyword_plan_network = client.enums.KeywordPlanNetworkEnum.GOOGLE_SEARCH_AND_PARTNERS  # type: ignore List the location IDs
-        location_rns = keyword_ideas_utils.map_locations_ids_to_resource_names(client, location_ids_list)
+        keyword_plan_network = (
+            client.enums.KeywordPlanNetworkEnum.GOOGLE_SEARCH_AND_PARTNERS
+        )  # type: ignore List the location IDs
+        location_rns = keyword_ideas_utils.map_locations_ids_to_resource_names(
+            client, location_ids_list
+        )
 
         # Returns a fully-qualified language_constant string.
         language_rn_get_service = client.get_service("GoogleAdsService")
@@ -377,13 +401,19 @@ class GoogleAdsKwdIdeas(knext.PythonNode):
             )
         )
 
-        df_keyword_ideas_aggregated = keyword_ideas_utils.extract_first_item_if_all_chunk_numbers_are_1(
-            self.rows_per_chunk, df_keyword_ideas_aggregated
+        df_keyword_ideas_aggregated = (
+            keyword_ideas_utils.extract_first_item_if_all_chunk_numbers_are_1(
+                self.rows_per_chunk, df_keyword_ideas_aggregated
+            )
         )
-        df_monthly_search_volumes = keyword_ideas_utils.extract_first_item_if_all_chunk_numbers_are_1(
-            self.rows_per_chunk, df_monthly_search_volumes
+        df_monthly_search_volumes = (
+            keyword_ideas_utils.extract_first_item_if_all_chunk_numbers_are_1(
+                self.rows_per_chunk, df_monthly_search_volumes
+            )
         )
 
-        return knext.Table.from_pandas(df_keyword_ideas_aggregated), knext.Table.from_pandas(df_monthly_search_volumes)
+        return knext.Table.from_pandas(
+            df_keyword_ideas_aggregated
+        ), knext.Table.from_pandas(df_monthly_search_volumes)
 
         # [END generate_keyword_ideas]
