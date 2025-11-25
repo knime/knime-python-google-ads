@@ -15,7 +15,7 @@ mcp = ">=1.19.0,<2"
 ruff = ">=0.13.2,<0.14"
 
 [pypi-dependencies]
-google-ads-mcp = { git = "https://github.com/googleads/google-ads-mcp.git" }
+google-ads-mcp = ">=0.0.1"
 
 [feature.build.dependencies]
 python = "3.9.*"
