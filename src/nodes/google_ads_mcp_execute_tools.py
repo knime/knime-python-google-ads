@@ -137,11 +137,12 @@ def call_mcp_tool(tool_name, parameters, connection):
 
 
 @knext.node(
-    name="Google Ads MCP Tool Execution",
+    name="Google Ads MCP Tool Execution (Labs)",
     node_type=knext.NodeType.MANIPULATOR,
     icon_path="icons/gads-icon.png",
     category="Google Ads",
     keywords=["Google", "Google Ads", "MCP", "Tools", "Execute", "Execution"],
+    is_hidden=True,
 )
 @knext.input_port(
     name="Google Ads Connection",
