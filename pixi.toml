@@ -12,6 +12,7 @@ google-ads = ">=28.0.0"
 google-api-python-client = "*"
 protobuf = "*"
 mcp = ">=1.19.0,<2"
+ruff = "*"
 
 [pypi-dependencies]
 google-ads-mcp = { git = "https://github.com/googleads/google-ads-mcp.git" }
