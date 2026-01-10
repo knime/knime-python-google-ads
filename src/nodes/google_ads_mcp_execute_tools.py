@@ -142,14 +142,15 @@ def call_mcp_tool(tool_name, parameters, connection):
     icon_path="icons/gads-icon.png",
     category="Google Ads",
     keywords=["Google", "Google Ads", "MCP", "Tools", "Execute", "Execution"],
-    is_hidden=True,
+    is_hidden=False,
 )
 @knext.input_port(
     name="Google Ads Connection",
     description="Google Ads connection with authentication details",
     port_type=google_ad_port_type,
 )
-@knext.output_table(name="Output Data", description="KNIME table with MCP tool results")
+@knext.output_table(name="MCP Response", description="Full MCP response as JSON for AI agents")
+@knext.output_table(name="Data Table", description="Extracted data as a structured KNIME table")
 class GoogleAdsMCPToolsExecutor:
     """
     Executes Google Ads MCP tools with proper authentication and parameter handling.
@@ -175,8 +176,9 @@ class GoogleAdsMCPToolsExecutor:
 
     **Output**
 
-    - Returns a KNIME table with structured results from the executed MCP tool, automatically converted
-      to the most appropriate tabular format for further analysis.
+    - **MCP Response**: Full JSON response for AI agents including metadata (tool_name, parameters, record_count)
+    - **Data Table**: Extracted data records as a structured KNIME table, ready for downstream processing
+      (e.g., feeding into Budget Optimizer, filtering, joining with other data)
     """
 
     tool_name = knext.StringParameter(
@@ -269,8 +271,16 @@ class GoogleAdsMCPToolsExecutor:
             return str(result)
 
     def configure(self, configuration_context, input_spec):
-        # Validate that we have a Google Ads connection
-        return None
+        # Output 1: MCP Response - fixed schema (single JSON column)
+        response_schema = knext.Schema.from_columns([
+            knext.Column(knext.string(), "mcp_response")
+        ])
+        
+        # Output 2: Data Table - dynamic schema (depends on tool & fields requested)
+        # Return None to indicate schema is determined at execution time
+        data_schema = None
+        
+        return response_schema, data_schema
 
     def execute(self, exec_context, google_ads_connection):
         try:
@@ -334,10 +344,21 @@ class GoogleAdsMCPToolsExecutor:
                 "record_count": len(clean_data) if isinstance(clean_data, list) else 1,
             }
 
-            # Convert to single-row DataFrame with JSON
-            df = pd.DataFrame(
+            # Output 1: Full MCP response as JSON (for agents)
+            response_df = pd.DataFrame(
                 [{"mcp_response": json.dumps(response, indent=2, default=str)}]
             )
+
+            # Output 2: Extracted data as structured table
+            if isinstance(clean_data, list) and len(clean_data) > 0:
+                # Data is a list of records - convert directly to DataFrame
+                data_df = pd.DataFrame(clean_data)
+            elif isinstance(clean_data, dict):
+                # Single record - wrap in list
+                data_df = pd.DataFrame([clean_data])
+            else:
+                # Scalar or other - create single-cell table
+                data_df = pd.DataFrame([{"result": clean_data}])
 
         except Exception as e:
             # Fallback: wrap raw result as JSON
@@ -351,9 +372,10 @@ class GoogleAdsMCPToolsExecutor:
                 "error": str(e),
             }
 
-            df = pd.DataFrame(
+            response_df = pd.DataFrame(
                 [{"mcp_response": json.dumps(fallback_response, indent=2)}]
             )
+            data_df = pd.DataFrame([{"raw_result": str(result), "error": str(e)}])
             exec_context.set_warning(error_msg)
 
-        return knext.Table.from_pandas(df)
+        return knext.Table.from_pandas(response_df), knext.Table.from_pandas(data_df)

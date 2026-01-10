@@ -352,7 +352,7 @@ def get_mcp_tools_with_descriptions(connection):
     icon_path="icons/gads-icon.png",
     category="Google Ads",
     keywords=["Google", "Google Ads", "MCP", "Tools", "List"],
-    is_hidden=True,
+    is_hidden=False,
 )
 @knext.input_port(
     name="Google Ads Connection",
