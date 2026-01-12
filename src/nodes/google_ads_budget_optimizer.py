@@ -51,7 +51,7 @@ execution in KNIME Hub with strict safety limits.
 
 import logging
 from datetime import datetime
-from typing import List, Tuple
+from typing import List, Optional
 
 import knime.extension as knext
 import pandas as pd
@@ -66,7 +66,7 @@ from util.common import (
     GoogleAdConnectionObject,
     google_ad_port_type,
 )
-from util.utils import create_type_filer
+from util.utils import check_column, create_type_filer
 
 LOGGER = logging.getLogger(__name__)
 
@@ -213,33 +213,17 @@ class BudgetAdjustment:
         knext.Effect.SHOW,
     )
 
-    # 4. Amount value
-    budget_step_absolute = knext.DoubleParameter(
-        label="Amount",
-        description="Fixed amount to change budget by (in currency units).",
-        default_value=50.0,
-        min_value=0.01,
-    ).rule(
-        knext.And(
-            knext.OneOf(budget_cap_mode, [BudgetCapMode.PER_CAMPAIGN.name]),
-            knext.OneOf(budget_step_mode, [BudgetStepMode.ABSOLUTE.name]),
+    # 4. Value (shared between Per Campaign and Total Budget modes)
+    budget_step_value = knext.DoubleParameter(
+        label="Value",
+        description=(
+            "Numeric value used for budget changes. "
+            "In 'Per Campaign' mode, this is either an absolute currency change (if 'Change by' is Absolute) "
+            "or a percentage multiplier (if 'Change by' is Percentage, e.g., 150 means +150%). "
+            "In 'Across All Campaigns' mode, this is the total amount to distribute across campaigns (currency units)."
         ),
-        knext.Effect.SHOW,
-    )
-
-    # 4. Percentage value
-    budget_step_percentage = knext.DoubleParameter(
-        label="Percentage",
-        description="Percentage to change budget by (e.g., 10 for 10%).",
         default_value=10.0,
         min_value=0.01,
-        max_value=100.0,
-    ).rule(
-        knext.And(
-            knext.OneOf(budget_cap_mode, [BudgetCapMode.PER_CAMPAIGN.name]),
-            knext.OneOf(budget_step_mode, [BudgetStepMode.PERCENTAGE.name]),
-        ),
-        knext.Effect.SHOW,
     )
 
     # 5. Max per campaign (guardrail - at the end)
@@ -254,17 +238,6 @@ class BudgetAdjustment:
     )
 
     # === Total budget mode parameters ===
-
-    # 3. Total amount
-    total_extra_budget = knext.DoubleParameter(
-        label="Total amount",
-        description="Total budget to distribute across ALL campaigns. Value in currency units.",
-        default_value=1000.0,
-        min_value=0.01,
-    ).rule(
-        knext.OneOf(budget_cap_mode, [BudgetCapMode.TOTAL_BUDGET.name]),
-        knext.Effect.SHOW,
-    )
 
     # 4. Distribution strategy
     distribution_strategy = knext.EnumParameter(
@@ -325,29 +298,32 @@ class BudgetAdjustment:
 )
 class GoogleAdsBudgetUpdater:
     """
-    Increases campaign budgets by a fixed amount or percentage via the Google Ads API.
+    Updates campaign budgets (increase or decrease) via the Google Ads API.
 
     This node is designed for **scheduled and agent-driven execution** in KNIME Hub with strict safety limits
-    (guardrails) to prevent runaway budget increases.
+    (guardrails) to prevent runaway budget changes.
 
     **Features**
 
-    - **Campaign Budget Updates**: Increase daily budgets by a fixed amount or percentage.
+    - **Campaign Budget Updates**: Increase or decrease daily budgets by a fixed amount or percentage.
     - **Two Budget Modes**: 
-      - *Per Campaign*: Each campaign can increase up to a max amount.
-      - *Total Budget*: Distribute a total extra budget across all campaigns.
+      - *Per Campaign*: Each campaign changes up to a max amount.
+      - *Total Budget*: Distribute a total budget change across all campaigns.
     - **Distribution Strategies** (for Total Budget mode):
       - *Equal Split*: Distribute evenly among campaigns.
       - *Proportional to Current Budget*: Higher-budget campaigns get more.
       - *Proportional to KPI*: Campaigns with more conversions/MQLs get more.
+    - **Shared Budget Handling**: Automatically detects when multiple campaigns share the same budget 
+      and updates it only once, preventing duplicate changes.
     - **Preview Mode**: Review proposed changes before applying them.
-    - **Deterministic Audit Output**: Full change log for compliance and debugging.
+    - **Agent-Friendly Output**: Rich messages in the audit log help AI agents understand each change.
 
     **Configuration**
 
     1. **Column Selection**: Map your input table columns to the required fields (campaign resource, budget resource, optional KPI).
-    2. **Budget Mode**: Choose Per Campaign or Total Budget distribution.
-    3. **Execution Mode**: Choose Preview to review changes or Apply to execute them.
+    2. **Direction**: Choose to Increase or Decrease budgets.
+    3. **Budget Mode**: Choose Per Campaign or Total Budget distribution.
+    4. **Execution Mode**: Choose Preview to review changes or Apply to execute them.
 
     **Input Table Requirements**
 
@@ -356,8 +332,15 @@ class GoogleAdsBudgetUpdater:
     - **Budget Resource Name**: Google Ads campaign budget resource name (e.g., 'customers/123/campaignBudgets/789').
     - **KPI Column** (optional): Numeric column for KPI-based distribution (e.g., conversions, MQLs).
 
+    **Shared Budgets**
+
+    If multiple campaigns in your input share the same budget resource, the node will:
+    - Update the shared budget **only once** (via the first campaign encountered)
+    - Mark subsequent campaigns as `SHARED_REF` in the audit log
+    - Include shared budget warnings in the message column for transparency
+
     **Tip**: Use upstream KNIME nodes (Row Filter, Rule-based Row Filter) to select which campaigns 
-    should receive budget increases based on performance metrics like cost, conversions, or ROAS.
+    should receive budget changes based on performance metrics like cost, conversions, or ROAS.
 
     **Mandatory Upstream Node**
 
@@ -365,8 +348,7 @@ class GoogleAdsBudgetUpdater:
 
     **Output**
 
-    1. **Audit / Change Log**: Detailed log of all proposed or applied changes.
-    2. **Google Ads Connection**: Pass-through for downstream nodes.
+    - **Audit / Change Log**: Detailed log of all proposed or applied changes with agent-friendly messages.
     """
 
     # Instantiate parameter groups (defined outside the class)
@@ -391,18 +373,44 @@ class GoogleAdsBudgetUpdater:
         configure_context: knext.ConfigurationContext,
         spec: GoogleAdObjectSpec,
         input_table_schema: knext.Schema,
-    ) -> Tuple[knext.Schema, GoogleAdObjectSpec]:
+    ) -> knext.Schema:
         """
-        Validate configuration and input table schema.
-        Returns the output schema for the audit log table and the pass-through connection spec.
+        Validate configuration and define output schema.
+        Returns the output schema for the audit log table.
         """
-        # Validate connection
-        if not hasattr(spec, "account_id"):
+
+        # Validate required column selections (fail early during configuration)
+        campaign_col = self.input_columns.campaign_resource_column
+        budget_col = self.input_columns.budget_resource_column
+
+        if not campaign_col:
             raise knext.InvalidParametersError(
-                "Connect to the Google Ads Connector node."
+                "Select a column for 'Campaign Resource Name' in the node configuration."
+            )
+        if not budget_col:
+            raise knext.InvalidParametersError(
+                "Select a column for 'Budget Resource Name' in the node configuration."
             )
 
-        # Column validation is handled by ColumnParameter - no need for manual checks
+        check_column(input_table_schema, campaign_col, knext.string(), "campaign resource name")
+        check_column(input_table_schema, budget_col, knext.string(), "budget resource name")
+
+        # KPI column is required only for Total Budget + Proportional to KPI
+        if (
+            self.budget_settings.budget_cap_mode == BudgetCapMode.TOTAL_BUDGET.name
+            and self.budget_settings.distribution_strategy
+            == DistributionStrategy.PROPORTIONAL_KPI.name
+        ):
+            kpi_col = self.budget_settings.kpi_column
+            if not kpi_col:
+                raise knext.InvalidParametersError(
+                    "Select a 'KPI Column' when using 'Proportional to KPI' distribution."
+                )
+            # Allow any numeric-like types; KNIME uses double/int64 commonly
+            if kpi_col not in input_table_schema.column_names:
+                raise knext.InvalidParametersError(
+                    f"The KPI column '{kpi_col}' is missing in the input table."
+                )
 
         # Define output schema for audit log
         audit_schema = knext.Schema.from_columns(
@@ -418,6 +426,8 @@ class GoogleAdsBudgetUpdater:
                 knext.Column(knext.string(), "status"),
                 knext.Column(knext.string(), "message"),
                 knext.Column(knext.string(), "timestamp"),
+                knext.Column(knext.bool_(), "is_shared_budget"),
+                knext.Column(knext.string(), "shared_with_campaigns"),
             ]
         )
 
@@ -432,7 +442,7 @@ class GoogleAdsBudgetUpdater:
         exec_context: knext.ExecutionContext,
         port_object: GoogleAdConnectionObject,
         input_table: knext.Table,
-    ) -> Tuple[knext.Table, GoogleAdConnectionObject]:
+    ) -> knext.Table:
         """
         Execute the budget optimization logic.
         """
@@ -445,6 +455,25 @@ class GoogleAdsBudgetUpdater:
         # Get column names from parameters
         campaign_col = self.input_columns.campaign_resource_column
         budget_col = self.input_columns.budget_resource_column
+
+
+        # Defensive validation: ColumnParameter should enforce this, but fail fast with a clear message
+        if not campaign_col:
+            raise knext.InvalidParametersError(
+                "Select a column for 'Campaign Resource Name' in the node configuration."
+            )
+        if not budget_col:
+            raise knext.InvalidParametersError(
+                "Select a column for 'Budget Resource Name' in the node configuration."
+            )
+        if campaign_col not in df.columns:
+            raise knext.InvalidParametersError(
+                f"Selected 'Campaign Resource Name' column '{campaign_col}' was not found in the input table."
+            )
+        if budget_col not in df.columns:
+            raise knext.InvalidParametersError(
+                f"Selected 'Budget Resource Name' column '{budget_col}' was not found in the input table."
+            )
 
         # Fetch current budgets from Google Ads
         exec_context.set_progress(0.1, "Fetching current campaign budgets...")
@@ -483,10 +512,18 @@ class GoogleAdsBudgetUpdater:
             "status",
             "message",
             "timestamp",
+            "is_shared_budget",
+            "shared_with_campaigns",
         ]
         for col in expected_columns:
             if col not in audit_df.columns:
                 audit_df[col] = None
+
+        # Convert shared_with_campaigns list to comma-separated string for KNIME compatibility
+        if "shared_with_campaigns" in audit_df.columns:
+            audit_df["shared_with_campaigns"] = audit_df["shared_with_campaigns"].apply(
+                lambda x: ", ".join(x) if isinstance(x, list) else ""
+            )
 
         audit_df = audit_df[expected_columns]
 
@@ -497,6 +534,16 @@ class GoogleAdsBudgetUpdater:
     # ==========================================================================
     # HELPER METHODS
     # ==========================================================================
+
+    @staticmethod
+    def _mask_customer_id(customer_id: str) -> str:
+        """Mask customer id for safer logs."""
+        if not customer_id:
+            return "<empty>"
+        s = str(customer_id)
+        if len(s) <= 4:
+            return "****"
+        return f"****{s[-4:]}"
 
     def _fetch_current_budgets(
         self, client: GoogleAdsClient, customer_id: str, df: pd.DataFrame, budget_col: str
@@ -515,6 +562,8 @@ class GoogleAdsBudgetUpdater:
 
         # Build GAQL query to fetch budget details
         ga_service = client.get_service("GoogleAdsService")
+
+        fail_count = 0
 
         for budget_resource in budget_resources:
             try:
@@ -548,10 +597,9 @@ class GoogleAdsBudgetUpdater:
                         f"Wrong column selected for Budget Resource Name.\n\n"
                         f"The value '{budget_resource}' is not a valid budget resource name.\n\n"
                         f"Expected format: 'customers/{{customer_id}}/campaignBudgets/{{budget_id}}'\n"
-                        f"Example: 'customers/1234567890/campaignBudgets/5555555555'\n\n"
-                        f"Tip: Select the column containing 'campaign_budget.resource_name' values."
+                        f"Example: 'customers/1234567890/campaignBudgets/5555555555'"
                     )
-                LOGGER.warning(f"Failed to fetch budget for {budget_resource}: {error_msg}")
+                fail_count += 1
                 continue
 
         return budget_data
@@ -563,6 +611,10 @@ class GoogleAdsBudgetUpdater:
         """
         Calculate proposed budget changes for all campaigns in the input.
         Returns a list of change records.
+        
+        IMPORTANT: Handles shared budgets correctly - if multiple campaigns share 
+        the same budget resource, the budget is only updated ONCE and all campaigns
+        are reported with their shared status.
         """
         timestamp = datetime.now().isoformat()
         
@@ -580,8 +632,7 @@ class GoogleAdsBudgetUpdater:
                     f"Wrong column selected for Campaign Resource Name.\n\n"
                     f"The value '{campaign_resource}' is not a valid campaign resource name.\n\n"
                     f"Expected format: 'customers/{{customer_id}}/campaigns/{{campaign_id}}'\n"
-                    f"Example: 'customers/1234567890/campaigns/9876543210'\n\n"
-                    f"Tip: Select the column containing 'campaign.resource_name' values."
+                    f"Example: 'customers/1234567890/campaigns/9876543210'"
                 )
 
             # Get current budget info
@@ -603,21 +654,57 @@ class GoogleAdsBudgetUpdater:
                 "kpi_value": kpi_value,
             })
 
-        # Calculate budget distribution based on mode
+        # Detect shared budgets: group campaigns by budget_resource
+        budget_to_campaigns = {}
+        for i, row in enumerate(campaign_rows):
+            budget_res = row["budget_resource"]
+            if budget_res not in budget_to_campaigns:
+                budget_to_campaigns[budget_res] = []
+            budget_to_campaigns[budget_res].append(i)
+
+        # For shared budgets, we only want to count the budget ONCE in calculations
+        # Create a deduplicated list for allocation calculation
+        unique_budget_rows = []
+        budget_to_dedup_idx = {}
+        for budget_res, campaign_indices in budget_to_campaigns.items():
+            # Use the first campaign's data as representative for allocation
+            first_idx = campaign_indices[0]
+            budget_to_dedup_idx[budget_res] = len(unique_budget_rows)
+            unique_budget_rows.append(campaign_rows[first_idx])
+
+        # Calculate budget distribution based on mode (using deduplicated rows)
         if self.budget_settings.budget_cap_mode == BudgetCapMode.TOTAL_BUDGET.name:
-            budget_allocations = self._calculate_total_budget_distribution(campaign_rows)
+            unique_allocations = self._calculate_total_budget_distribution(unique_budget_rows)
         else:
-            budget_allocations = self._calculate_per_campaign_changes(campaign_rows)
+            unique_allocations = self._calculate_per_campaign_changes(unique_budget_rows)
+
+
+        # Map allocations back to all campaigns (shared budgets get the same allocation)
+        budget_allocations = []
+        for campaign_row in campaign_rows:
+            budget_res = campaign_row["budget_resource"]
+            dedup_idx = budget_to_dedup_idx[budget_res]
+            budget_allocations.append(unique_allocations[dedup_idx])
+
+        # Track which budgets have already been marked for update (to avoid duplicate API calls)
+        budgets_to_update = set()
 
         # Build change records
         changes = []
         for i, campaign_row in enumerate(campaign_rows):
             current_budget = campaign_row["current_budget"]
             budget_change = budget_allocations[i]
+            budget_res = campaign_row["budget_resource"]
+            
+            # Check if this is a shared budget
+            shared_campaign_indices = budget_to_campaigns[budget_res]
+            is_shared = len(shared_campaign_indices) > 1
+            shared_count = len(shared_campaign_indices)
+            shared_campaign_names = [campaign_rows[idx]["campaign_name"] for idx in shared_campaign_indices]
             
             change_record = {
                 "campaign_resource_name": campaign_row["campaign_resource"],
-                "campaign_budget_resource_name": campaign_row["budget_resource"],
+                "campaign_budget_resource_name": budget_res,
                 "campaign_name": campaign_row["campaign_name"],
                 "current_budget": current_budget,
                 "proposed_budget": current_budget,
@@ -627,16 +714,52 @@ class GoogleAdsBudgetUpdater:
                 "status": "PENDING",
                 "message": "",
                 "timestamp": timestamp,
+                "is_shared_budget": is_shared,
+                "shared_with_campaigns": shared_campaign_names if is_shared else [],
             }
 
             # Check if budget was found
             if current_budget == 0:
                 change_record["action"] = "SKIPPED"
-                change_record["message"] = "Could not fetch current budget from Google Ads"
+                change_record["message"] = self._build_rich_message(
+                    action="SKIPPED",
+                    reason="Could not fetch current budget from Google Ads",
+                    campaign_name=campaign_row["campaign_name"],
+                    current_budget=0,
+                    proposed_budget=0,
+                    budget_change=0,
+                    budget_change_pct=0,
+                    is_shared=is_shared,
+                    shared_count=shared_count,
+                    shared_campaigns=shared_campaign_names,
+                )
+                changes.append(change_record)
+                continue
+
+            # For shared budgets, only the FIRST campaign triggers the actual update
+            if is_shared and budget_res in budgets_to_update:
+                # This budget was already processed - mark as shared reference
+                change_record["action"] = "SHARED_REF"
+                change_record["status"] = "SHARED"
+                change_record["message"] = self._build_rich_message(
+                    action="SHARED_REF",
+                    reason=f"Budget shared with {shared_count} campaigns - update applied via first campaign",
+                    campaign_name=campaign_row["campaign_name"],
+                    current_budget=current_budget,
+                    proposed_budget=current_budget + budget_change if self.budget_settings.budget_direction != BudgetDirection.DECREASE.name else max(0, current_budget - budget_change),
+                    budget_change=budget_change,
+                    budget_change_pct=(budget_change / current_budget) * 100 if current_budget > 0 else 0,
+                    is_shared=is_shared,
+                    shared_count=shared_count,
+                    shared_campaigns=shared_campaign_names,
+                )
                 changes.append(change_record)
                 continue
 
             if budget_change > 0:
+                # Mark this budget as processed (for shared budget deduplication)
+                budgets_to_update.add(budget_res)
+                
                 # Determine direction
                 is_decrease = self.budget_settings.budget_direction == BudgetDirection.DECREASE.name
                 
@@ -645,23 +768,81 @@ class GoogleAdsBudgetUpdater:
                     actual_change = current_budget - new_budget
                     budget_change_pct = (actual_change / current_budget) * 100 if current_budget > 0 else 0
                     action = "DECREASE"
-                    message = f"Decreasing budget by {actual_change:.2f} ({budget_change_pct:.1f}%)"
                 else:
                     new_budget = current_budget + budget_change
                     budget_change_pct = (budget_change / current_budget) * 100 if current_budget > 0 else 0
                     actual_change = budget_change
                     action = "INCREASE"
-                    message = f"Increasing budget by {budget_change:.2f} ({budget_change_pct:.1f}%)"
+
+                # Round to cents to avoid Google Ads "not a multiple of minimum unit" error
+                new_budget = round(new_budget, 2)
+                actual_change = round(actual_change, 2)
 
                 change_record["proposed_budget"] = new_budget
                 change_record["budget_change"] = actual_change if not is_decrease else -actual_change
                 change_record["budget_change_pct"] = budget_change_pct if not is_decrease else -budget_change_pct
                 change_record["action"] = action
-                change_record["message"] = message
+                change_record["message"] = self._build_rich_message(
+                    action=action,
+                    reason=None,
+                    campaign_name=campaign_row["campaign_name"],
+                    current_budget=current_budget,
+                    proposed_budget=new_budget,
+                    budget_change=actual_change if not is_decrease else -actual_change,
+                    budget_change_pct=budget_change_pct if not is_decrease else -budget_change_pct,
+                    is_shared=is_shared,
+                    shared_count=shared_count,
+                    shared_campaigns=shared_campaign_names,
+                )
 
             changes.append(change_record)
 
         return changes
+
+    def _build_rich_message(
+        self,
+        action: str,
+        reason: Optional[str],
+        campaign_name: str,
+        current_budget: float,
+        proposed_budget: float,
+        budget_change: float,
+        budget_change_pct: float,
+        is_shared: bool,
+        shared_count: int,
+        shared_campaigns: List[str],
+    ) -> str:
+        """
+        Build a rich, agent-friendly message with all relevant context.
+        This allows AI agents to understand the full picture of each change.
+        """
+        parts = []
+        
+        # Action summary
+        if action == "INCREASE":
+            parts.append(f"INCREASE: {campaign_name}")
+            parts.append(f"Budget: ${current_budget:.2f} → ${proposed_budget:.2f} (+${abs(budget_change):.2f}, +{abs(budget_change_pct):.1f}%)")
+        elif action == "DECREASE":
+            parts.append(f"DECREASE: {campaign_name}")
+            parts.append(f"Budget: ${current_budget:.2f} → ${proposed_budget:.2f} (-${abs(budget_change):.2f}, -{abs(budget_change_pct):.1f}%)")
+        elif action == "SKIPPED":
+            parts.append(f"SKIPPED: {campaign_name}")
+            if reason:
+                parts.append(f"Reason: {reason}")
+        elif action == "SHARED_REF":
+            parts.append(f"SHARED BUDGET (no duplicate update): {campaign_name}")
+            parts.append(f"Budget: ${current_budget:.2f} → ${proposed_budget:.2f}")
+        else:
+            parts.append(f"NO CHANGE: {campaign_name}")
+            parts.append(f"Budget remains at ${current_budget:.2f}")
+        
+        # Shared budget info
+        if is_shared:
+            other_campaigns = [c for c in shared_campaigns if c != campaign_name]
+            if other_campaigns:
+                parts.append(f"⚠️ Shared budget with: {', '.join(other_campaigns)}")
+        
+        return " | ".join(parts)
 
     def _calculate_per_campaign_changes(self, campaign_rows: List[dict]) -> List[float]:
         """
@@ -679,9 +860,9 @@ class GoogleAdsBudgetUpdater:
 
             # Calculate budget change based on mode
             if self.budget_settings.budget_step_mode == BudgetStepMode.ABSOLUTE.name:
-                budget_change = self.budget_settings.budget_step_absolute
+                budget_change = self.budget_settings.budget_step_value
             else:
-                budget_change = current_budget * (self.budget_settings.budget_step_percentage / 100.0)
+                budget_change = current_budget * (self.budget_settings.budget_step_value / 100.0)
 
             # Apply guardrail: cap at max budget change per campaign
             budget_change = min(budget_change, self.budget_settings.max_budget_change)
@@ -692,10 +873,11 @@ class GoogleAdsBudgetUpdater:
     def _calculate_total_budget_distribution(self, campaign_rows: List[dict]) -> List[float]:
         """
         Calculate budget distribution using total budget mode.
-        Distributes total_extra_budget across all campaigns based on strategy.
+        Distributes a total amount across all campaigns based on strategy.
         """
-        total_budget = self.budget_settings.total_extra_budget
+        total_budget = self.budget_settings.budget_step_value
         strategy = self.budget_settings.distribution_strategy
+
         
         # Filter to valid campaigns (those with current budget > 0)
         valid_indices = [i for i, c in enumerate(campaign_rows) if c["current_budget"] > 0]
@@ -732,7 +914,6 @@ class GoogleAdsBudgetUpdater:
                 per_campaign = total_budget / n_valid
                 for i in valid_indices:
                     allocations[i] = per_campaign
-                LOGGER.warning("No KPI values found, falling back to equal distribution")
 
         return allocations
 
@@ -741,8 +922,11 @@ class GoogleAdsBudgetUpdater:
         Generate preview records without applying changes.
         """
         for change in changes:
-            if change["action"] == "INCREASE":
+            if change["action"] in ("INCREASE", "DECREASE"):
                 change["status"] = "PREVIEW"
+                change["message"] = f"[PREVIEW] {change['message']}"
+            elif change["action"] == "SHARED_REF":
+                change["status"] = "PREVIEW_SHARED"
                 change["message"] = f"[PREVIEW] {change['message']}"
             elif change["action"] == "SKIPPED":
                 change["status"] = "SKIPPED"
@@ -760,16 +944,26 @@ class GoogleAdsBudgetUpdater:
     ) -> List[dict]:
         """
         Apply budget changes to Google Ads via the API.
+        
+        IMPORTANT: Only applies changes for INCREASE/DECREASE actions.
+        SHARED_REF actions are skipped (the budget was already updated via the primary campaign).
         """
         campaign_budget_service = client.get_service("CampaignBudgetService")
 
-        total_changes = len([c for c in changes if c["action"] == "INCREASE"])
+        # Count actionable changes (both INCREASE and DECREASE, but not SHARED_REF)
+        actionable_changes = [c for c in changes if c["action"] in ("INCREASE", "DECREASE")]
+        total_changes = len(actionable_changes)
         applied_count = 0
+        failed_count = 0
 
         for change in changes:
-            if change["action"] != "INCREASE":
+            # Skip non-actionable records
+            if change["action"] not in ("INCREASE", "DECREASE"):
                 if change["action"] == "SKIPPED":
                     change["status"] = "SKIPPED"
+                elif change["action"] == "SHARED_REF":
+                    change["status"] = "SHARED_APPLIED"
+                    # Keep the existing message (already set in _calculate_budget_changes)
                 else:
                     change["status"] = "NO_ACTION"
                 continue
@@ -783,7 +977,9 @@ class GoogleAdsBudgetUpdater:
                 budget.resource_name = change["campaign_budget_resource_name"]
 
                 # Set the new budget amount in micros
-                new_amount_micros = int(change["proposed_budget"] * MICROS_PER_UNIT)
+                # Round to cents (2 decimal places) to avoid "not a multiple of minimum unit" error
+                rounded_budget = round(change["proposed_budget"], 2)
+                new_amount_micros = int(rounded_budget * MICROS_PER_UNIT)
                 budget.amount_micros = new_amount_micros
 
                 # Create field mask for the update
@@ -791,16 +987,14 @@ class GoogleAdsBudgetUpdater:
                 operation.update_mask.CopyFrom(field_mask)
 
                 # Execute the mutation
-                response = campaign_budget_service.mutate_campaign_budgets(
+                campaign_budget_service.mutate_campaign_budgets(
                     customer_id=customer_id, operations=[operation]
                 )
 
                 # Mark as successful
                 change["status"] = "SUCCESS"
-                change["message"] = (
-                    f"Budget updated successfully. "
-                    f"Resource: {response.results[0].resource_name}"
-                )
+                # Append success info to existing rich message
+                change["message"] = f"{change['message']} | ✅ Applied successfully"
 
                 applied_count += 1
                 progress = 0.5 + (0.4 * applied_count / max(total_changes, 1))
@@ -816,16 +1010,14 @@ class GoogleAdsBudgetUpdater:
                         f"Wrong column selected for Budget Resource Name.\n\n"
                         f"The value '{change['campaign_budget_resource_name']}' is not a valid budget resource name.\n\n"
                         f"Expected format: 'customers/{{customer_id}}/campaignBudgets/{{budget_id}}'\n"
-                        f"Example: 'customers/1234567890/campaignBudgets/5555555555'\n\n"
-                        f"Tip: Select the column containing 'campaign_budget.resource_name' values."
+                        f"Example: 'customers/1234567890/campaignBudgets/5555555555'"
                     )
                 change["status"] = "FAILED"
-                change["message"] = f"API Error: {error_message}"
-                LOGGER.error(f"Failed to update budget: {error_message}")
+                change["message"] = f"{change['message']} | ❌ API Error: {error_message}"
+                failed_count += 1
 
             except Exception as ex:
                 change["status"] = "FAILED"
-                change["message"] = f"Error: {str(ex)}"
-                LOGGER.error(f"Unexpected error updating budget: {str(ex)}")
-
+                change["message"] = f"{change['message']} | ❌ Error: {str(ex)}"
+                failed_count += 1
         return changes
