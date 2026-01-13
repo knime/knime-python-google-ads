@@ -53,7 +53,6 @@ Pure executor — all rules/filtering done upstream with KNIME nodes.
 
 import logging
 from datetime import datetime
-from typing import Set
 
 import knime.extension as knext
 import pandas as pd
@@ -68,6 +67,9 @@ from util.common import (
     google_ad_port_type,
 )
 from util.utils import check_column, create_type_filer
+# FieldInspector is used to convert Google Ads API enum integer values to their string names
+# (e.g., KeywordMatchTypeEnum returns integers like 2, 3, 4 instead of "EXACT", "PHRASE", "BROAD")
+from util.pre_built_ad_queries import FieldInspector
 
 LOGGER = logging.getLogger(__name__)
 
@@ -194,8 +196,16 @@ class GoogleAdsSearchTermsActions:
 
     **Duplicate Handling**
 
-    Enable "Skip duplicates" in Advanced settings to automatically skip search terms
-    that already exist as keywords or negatives (instead of failing with an API error).
+    The node queries existing keywords/negatives before processing to detect duplicates.
+    This prevents API errors and provides clear feedback in the output table. Keywords
+    that already exist are marked with status "ALREADY_EXISTS_AS_KEYWORD" or
+    "ALREADY_EXISTS_AS_NEGATIVE_KEYWORD" and processing continues with the remaining terms.
+
+    **Performance for Large Accounts**
+
+    The node uses batched API queries to efficiently check for duplicates, even in accounts
+    with thousands of ad groups and keywords. The batch size can be adjusted in Advanced
+    Settings if needed (default: 100 ad groups per query).
 
     **Tip: Bulk Negative Uploads**
 
@@ -284,7 +294,7 @@ class GoogleAdsSearchTermsActions:
         description="Column containing Google Ads ad group resource names (e.g., 'customers/123/adGroups/789'). Required for ad group negatives and keyword promotion.",
         port_index=1,
         include_row_key=False,
-        include_none_column=True,
+        include_none_column=False,
         column_filter=create_type_filer(knext.string()),
     ).rule(
         knext.Or(
@@ -307,13 +317,17 @@ class GoogleAdsSearchTermsActions:
     )
 
     # ==========================================================================
-    # ADVANCED
+    # ADVANCED SETTINGS
     # ==========================================================================
 
-    skip_duplicates = knext.BoolParameter(
-        label="Skip duplicates",
-        description="Check for existing keywords/negatives before creating. Skips duplicates instead of failing.",
-        default_value=True,
+    batch_size = knext.IntParameter(
+        label="Batch Size for Duplicate Check",
+        description="Number of ad groups/campaigns to query per API call when checking for existing keywords. "
+                    "Higher values reduce API calls but increase query size. For accounts with thousands of "
+                    "ad groups, a smaller batch size may be more reliable. Default of 100 works well for most accounts.",
+        default_value=100,
+        min_value=10,
+        max_value=500,
         is_advanced=True,
     )
 
@@ -363,23 +377,22 @@ class GoogleAdsSearchTermsActions:
                 )
             check_column(input_table_schema, ad_group_col, knext.string(), "ad group resource name")
 
-        # Define output schema
-        output_schema = knext.Schema.from_columns(
-            [
-                knext.Column(knext.string(), "search_term"),
-                knext.Column(knext.string(), "action"),
-                knext.Column(knext.string(), "match_type"),
-                knext.Column(knext.string(), "campaign_resource_name"),
-                knext.Column(knext.string(), "ad_group_resource_name"),
-                knext.Column(knext.string(), "criterion_resource_name"),
-                knext.Column(knext.string(), "status"),
-                knext.Column(knext.string(), "message"),
-                knext.Column(knext.string(), "api_error"),
-                knext.Column(knext.string(), "timestamp"),
-            ]
-        )
+        # Define output schema: input columns + result columns
+        # Start with input columns
+        output_columns = list(input_table_schema)
+        
+        # Add result columns - ad_group_name only when needed (not for campaign-level negatives)
+        result_column_names = ["Campaign Name", "Match Type", "Status", "Message", "Timestamp"]
+        if requires_ad_group:
+            result_column_names.insert(1, "Ad Group Name")  # Add after Campaign Name
+        
+        existing_col_names = {col.name for col in output_columns}
+        
+        for col_name in result_column_names:
+            if col_name not in existing_col_names:
+                output_columns.append(knext.Column(knext.string(), col_name))
 
-        return output_schema
+        return knext.Schema.from_columns(output_columns)
 
     # ==========================================================================
     # EXECUTE
@@ -395,6 +408,9 @@ class GoogleAdsSearchTermsActions:
 
         client: GoogleAdsClient = port_object.client
         customer_id = port_object.spec.account_id
+
+        # Create FieldInspector for enum handling
+        field_inspector = FieldInspector(client, client.enums)
 
         # Convert input to DataFrame
         df = input_table.to_pandas()
@@ -418,13 +434,18 @@ class GoogleAdsSearchTermsActions:
             action_name = "PROMOTE_TO_KEYWORD"
             match_type = self.promotion_match_type
 
-        # Get existing criteria for duplicate detection
-        existing_criteria: Set[str] = set()
-        if self.skip_duplicates:
-            exec_context.set_progress(0.1, "Checking for existing keywords/negatives...")
-            existing_criteria = self._fetch_existing_criteria(
-                client, customer_id, df, campaign_col, ad_group_col, is_negative, is_campaign_level
-            )
+        # Fetch human-readable names for campaigns (always) and ad groups (only when needed)
+        exec_context.set_progress(0.05, "Fetching campaign and ad group names...")
+        campaign_names, ad_group_names = self._fetch_resource_names(
+            client, customer_id, df, campaign_col, ad_group_col, is_negative, is_campaign_level
+        )
+
+        # Get existing criteria for duplicate detection (always fetch to detect duplicates)
+        exec_context.set_progress(0.1, "Checking for existing keywords/negatives...")
+        existing_criteria: dict = self._fetch_existing_criteria(
+            client, customer_id, df, campaign_col, ad_group_col, is_negative, is_campaign_level, field_inspector
+        )
+        LOGGER.debug(f"Fetched {len(existing_criteria)} existing criteria for duplicate detection")
 
         # Process each row
         exec_context.set_progress(0.3, "Processing search terms...")
@@ -444,39 +465,34 @@ class GoogleAdsSearchTermsActions:
             if ad_group_col and ad_group_col != "<none>" and ad_group_col in df.columns:
                 ad_group_resource = str(row[ad_group_col]) if pd.notna(row[ad_group_col]) else ""
 
-            result = {
-                "search_term": search_term,
-                "action": action_name,
-                "match_type": match_type,
-                "campaign_resource_name": campaign_resource,
-                "ad_group_resource_name": ad_group_resource,
-                "criterion_resource_name": "",
-                "status": "",
-                "message": "",
-                "api_error": "",
-                "timestamp": timestamp,
-            }
+            # Start with all input columns, then add result columns
+            result = row.to_dict()
+            # Add human-readable names from API
+            result["Campaign Name"] = campaign_names.get(campaign_resource, "")
+            if not (is_negative and is_campaign_level):
+                result["Ad Group Name"] = ad_group_names.get(ad_group_resource, "")
+            result["Match Type"] = match_type
+            result["Status"] = ""
+            result["Message"] = ""
+            result["Timestamp"] = timestamp
 
             # Validate inputs
             if not search_term:
-                result["status"] = "FAILED"
-                result["message"] = "Empty search term"
-                result["api_error"] = "Search term text is empty"
+                result["Status"] = "FAILED"
+                result["Message"] = "Search term text is empty"
                 results.append(result)
                 continue
 
             if not campaign_resource:
-                result["status"] = "FAILED"
-                result["message"] = "Missing campaign resource name"
-                result["api_error"] = "Campaign resource name is empty"
+                result["Status"] = "FAILED"
+                result["Message"] = "Campaign resource name is empty"
                 results.append(result)
                 continue
 
             if not is_campaign_level or not is_negative:
                 if not ad_group_resource:
-                    result["status"] = "FAILED"
-                    result["message"] = "Missing ad group resource name"
-                    result["api_error"] = "Ad group resource name required for this action"
+                    result["Status"] = "FAILED"
+                    result["Message"] = "Ad group resource name required for this action"
                     results.append(result)
                     continue
 
@@ -485,16 +501,29 @@ class GoogleAdsSearchTermsActions:
                 search_term, match_type, campaign_resource, ad_group_resource, is_negative, is_campaign_level
             )
             if duplicate_key in existing_criteria:
-                result["status"] = "DUPLICATE"
-                result["message"] = f"Skipped: '{search_term}' already exists as {match_type} match"
+                existing_type = existing_criteria[duplicate_key]  # 'POSITIVE' or 'NEGATIVE'
+                # Use clearer status names
+                if existing_type == "POSITIVE":
+                    result["Status"] = "ALREADY_EXISTS_AS_KEYWORD"
+                    keyword_type = "keyword"
+                else:
+                    result["Status"] = "ALREADY_EXISTS_AS_NEGATIVE_KEYWORD"
+                    keyword_type = "negative keyword"
+                # Build location string using fetched names
+                if is_negative and is_campaign_level:
+                    location = f"in campaign '{result.get('Campaign Name', '')}'"
+                else:
+                    location = f"in ad group '{result.get('Ad Group Name', '')}'"
+                result["Message"] = f"'{search_term}' already exists as {match_type} {keyword_type} {location}"
                 results.append(result)
                 continue
 
             # Preview mode - no API call
             if is_preview:
-                result["status"] = "PREVIEW"
-                result["message"] = self._build_preview_message(
-                    search_term, action_name, match_type, is_campaign_level
+                result["Status"] = "PREVIEW"
+                result["Message"] = self._build_preview_message(
+                    search_term, action_name, match_type, is_campaign_level,
+                    result.get("Campaign Name", ""), result.get("Ad Group Name", "")
                 )
                 results.append(result)
                 continue
@@ -505,24 +534,22 @@ class GoogleAdsSearchTermsActions:
                     client, customer_id, search_term, match_type,
                     campaign_resource, ad_group_resource, is_negative, is_campaign_level
                 )
-                result["criterion_resource_name"] = criterion_resource
-                result["status"] = "SUCCESS"
-                result["message"] = self._build_success_message(
-                    search_term, action_name, match_type, is_campaign_level
+                result["Status"] = "SUCCESS"
+                result["Message"] = self._build_success_message(
+                    search_term, action_name, match_type, is_campaign_level,
+                    result.get("Campaign Name", ""), result.get("Ad Group Name", "")
                 )
-                # Add to existing set to prevent duplicates within same run
-                existing_criteria.add(duplicate_key)
+                # Add to existing dict to prevent duplicates within same run
+                existing_criteria[duplicate_key] = "NEGATIVE" if is_negative else "POSITIVE"
 
             except GoogleAdsException as ex:
                 error_msg = ex.failure.errors[0].message if ex.failure.errors else str(ex)
-                result["status"] = "FAILED"
-                result["message"] = f"Failed to create {action_name.lower().replace('_', ' ')}"
-                result["api_error"] = error_msg
+                result["Status"] = "FAILED"
+                result["Message"] = f"API error: {error_msg}"
 
             except Exception as ex:
-                result["status"] = "FAILED"
-                result["message"] = "Unexpected error"
-                result["api_error"] = str(ex)
+                result["Status"] = "FAILED"
+                result["Message"] = f"Unexpected error: {str(ex)}"
 
             results.append(result)
 
@@ -536,6 +563,69 @@ class GoogleAdsSearchTermsActions:
     # ==========================================================================
     # HELPER METHODS
     # ==========================================================================
+
+    def _fetch_resource_names(
+        self, client: GoogleAdsClient, customer_id: str, df: pd.DataFrame,
+        campaign_col: str, ad_group_col: str, is_negative: bool, is_campaign_level: bool
+    ) -> tuple:
+        """
+        Fetch human-readable names for campaigns and ad groups.
+        
+        Returns:
+            tuple: (campaign_names dict, ad_group_names dict)
+                   Maps resource_name -> display_name
+        """
+        ga_service = client.get_service("GoogleAdsService")
+        campaign_names = {}
+        ad_group_names = {}
+        
+        # Get unique campaign resource names
+        campaign_resources = df[campaign_col].dropna().unique().tolist()
+        
+        if campaign_resources:
+            # Build query for campaign names
+            campaign_ids = []
+            for res in campaign_resources:
+                # Extract campaign ID from resource name like 'customers/123/campaigns/456'
+                parts = res.split('/')
+                if len(parts) >= 4 and parts[2] == 'campaigns':
+                    campaign_ids.append(parts[3])
+            
+            if campaign_ids:
+                query = f"""
+                    SELECT campaign.resource_name, campaign.name
+                    FROM campaign
+                    WHERE campaign.id IN ({','.join(campaign_ids)})
+                """
+                response = ga_service.search(customer_id=customer_id, query=query)
+                for row in response:
+                    campaign_names[row.campaign.resource_name] = row.campaign.name
+        
+        # Only fetch ad group names if needed (not campaign-level negatives)
+        if not (is_negative and is_campaign_level):
+            if ad_group_col and ad_group_col != "<none>" and ad_group_col in df.columns:
+                ad_group_resources = df[ad_group_col].dropna().unique().tolist()
+                
+                if ad_group_resources:
+                    # Build query for ad group names
+                    ad_group_ids = []
+                    for res in ad_group_resources:
+                        # Extract ad group ID from resource name like 'customers/123/adGroups/789'
+                        parts = res.split('/')
+                        if len(parts) >= 4 and parts[2] == 'adGroups':
+                            ad_group_ids.append(parts[3])
+                    
+                    if ad_group_ids:
+                        query = f"""
+                            SELECT ad_group.resource_name, ad_group.name
+                            FROM ad_group
+                            WHERE ad_group.id IN ({','.join(ad_group_ids)})
+                        """
+                        response = ga_service.search(customer_id=customer_id, query=query)
+                        for row in response:
+                            ad_group_names[row.ad_group.resource_name] = row.ad_group.name
+        
+        return campaign_names, ad_group_names
 
     def _get_match_type_enum(self, client: GoogleAdsClient, match_type: str):
         """Convert match type string to Google Ads enum."""
@@ -561,92 +651,140 @@ class GoogleAdsSearchTermsActions:
 
     def _fetch_existing_criteria(
         self, client: GoogleAdsClient, customer_id: str, df: pd.DataFrame,
-        campaign_col: str, ad_group_col: str, is_negative: bool, is_campaign_level: bool
-    ) -> Set[str]:
-        """Fetch existing keywords/negatives for duplicate detection."""
-        existing = set()
+        campaign_col: str, ad_group_col: str, is_negative: bool, is_campaign_level: bool,
+        field_inspector: FieldInspector
+    ) -> dict:
+        """Fetch existing keywords/negatives for duplicate detection.
+        
+        Uses batched queries with IN clauses for better performance with large accounts.
+        Batches IDs in chunks of 100 to avoid query size limits while minimizing API calls.
+        
+        Returns:
+            dict: Maps duplicate_key -> 'POSITIVE' or 'NEGATIVE'
+        """
+        existing = {}  # key -> 'POSITIVE' or 'NEGATIVE'
         ga_service = client.get_service("GoogleAdsService")
+        
+        # Batch size from advanced settings - balances query size limits vs API call overhead
+        batch_size = self.batch_size
+        
+        # Get enum mappings for match type
+        match_type_mapping = field_inspector._load_enum_mapping("KeywordMatchTypeEnum.KeywordMatchType")
 
         try:
             if is_negative and is_campaign_level:
-                # Query campaign-level negatives
-                campaigns = df[campaign_col].unique().tolist()
-                for campaign_resource in campaigns:
-                    if not campaign_resource:
-                        continue
-                    query = f"""
-                        SELECT
-                            campaign_criterion.keyword.text,
-                            campaign_criterion.keyword.match_type,
-                            campaign_criterion.campaign
-                        FROM campaign_criterion
-                        WHERE campaign_criterion.campaign = '{campaign_resource}'
-                            AND campaign_criterion.negative = TRUE
-                            AND campaign_criterion.type = 'KEYWORD'
-                    """
-                    try:
-                        response = ga_service.search(customer_id=customer_id, query=query)
-                        for row in response:
-                            term = row.campaign_criterion.keyword.text.lower().strip()
-                            match = row.campaign_criterion.keyword.match_type.name
-                            key = f"neg_campaign:{campaign_resource}:{term}:{match}"
-                            existing.add(key)
-                    except GoogleAdsException:
-                        continue
+                # Query campaign-level negatives using batched queries
+                campaigns = [c for c in df[campaign_col].unique().tolist() if c]
+                if campaigns:
+                    # Extract campaign IDs
+                    campaign_ids = []
+                    for res in campaigns:
+                        parts = res.split('/')
+                        if len(parts) >= 4 and parts[2] == 'campaigns':
+                            campaign_ids.append(parts[3])
+                    
+                    # Process in batches to avoid query size limits
+                    for i in range(0, len(campaign_ids), batch_size):
+                        batch_ids = campaign_ids[i:i + batch_size]
+                        query = f"""
+                            SELECT
+                                campaign_criterion.keyword.text,
+                                campaign_criterion.keyword.match_type,
+                                campaign_criterion.campaign
+                            FROM campaign_criterion
+                            WHERE campaign.id IN ({','.join(batch_ids)})
+                                AND campaign_criterion.negative = TRUE
+                                AND campaign_criterion.type = 'KEYWORD'
+                        """
+                        try:
+                            response = ga_service.search(customer_id=customer_id, query=query)
+                            for row in response:
+                                term = row.campaign_criterion.keyword.text.lower().strip()
+                                match_raw = match_type_mapping.get(row.campaign_criterion.keyword.match_type, "")
+                                match = match_raw.upper().replace(" ", "_") if match_raw else str(row.campaign_criterion.keyword.match_type)
+                                campaign_resource = row.campaign_criterion.campaign
+                                key = f"neg_campaign:{campaign_resource}:{term}:{match}"
+                                existing[key] = "NEGATIVE"
+                        except GoogleAdsException as gex:
+                            LOGGER.warning(f"Error querying campaign negatives: {gex}")
 
             elif is_negative:
-                # Query ad group-level negatives
+                # Query ad group-level negatives AND positive keywords (to detect conflicts)
                 if ad_group_col and ad_group_col in df.columns:
-                    ad_groups = df[ad_group_col].unique().tolist()
-                    for ad_group_resource in ad_groups:
-                        if not ad_group_resource:
-                            continue
-                        query = f"""
-                            SELECT
-                                ad_group_criterion.keyword.text,
-                                ad_group_criterion.keyword.match_type,
-                                ad_group_criterion.ad_group
-                            FROM ad_group_criterion
-                            WHERE ad_group_criterion.ad_group = '{ad_group_resource}'
-                                AND ad_group_criterion.negative = TRUE
-                                AND ad_group_criterion.type = 'KEYWORD'
-                        """
-                        try:
-                            response = ga_service.search(customer_id=customer_id, query=query)
-                            for row in response:
-                                term = row.ad_group_criterion.keyword.text.lower().strip()
-                                match = row.ad_group_criterion.keyword.match_type.name
-                                key = f"neg_adgroup:{ad_group_resource}:{term}:{match}"
-                                existing.add(key)
-                        except GoogleAdsException:
-                            continue
+                    ad_groups = [ag for ag in df[ad_group_col].unique().tolist() if ag and not pd.isna(ag)]
+                    if ad_groups:
+                        # Extract ad group IDs
+                        ad_group_ids = []
+                        for res in ad_groups:
+                            parts = str(res).split('/')
+                            if len(parts) >= 4 and parts[2] == 'adGroups':
+                                ad_group_ids.append(parts[3])
+                        
+                        # Process in batches to avoid query size limits
+                        for i in range(0, len(ad_group_ids), batch_size):
+                            batch_ids = ad_group_ids[i:i + batch_size]
+                            query = f"""
+                                SELECT
+                                    ad_group_criterion.keyword.text,
+                                    ad_group_criterion.keyword.match_type,
+                                    ad_group_criterion.ad_group,
+                                    ad_group_criterion.negative
+                                FROM ad_group_criterion
+                                WHERE ad_group.id IN ({','.join(batch_ids)})
+                                    AND ad_group_criterion.type = 'KEYWORD'
+                                    AND ad_group_criterion.status != 'REMOVED'
+                            """
+                            try:
+                                response = ga_service.search(customer_id=customer_id, query=query)
+                                for row in response:
+                                    term = row.ad_group_criterion.keyword.text.lower().strip()
+                                    match_raw = match_type_mapping.get(row.ad_group_criterion.keyword.match_type, "")
+                                    match = match_raw.upper().replace(" ", "_") if match_raw else str(row.ad_group_criterion.keyword.match_type)
+                                    is_neg = row.ad_group_criterion.negative
+                                    ad_group_resource = row.ad_group_criterion.ad_group
+                                    key = f"neg_adgroup:{ad_group_resource}:{term}:{match}"
+                                    existing[key] = "NEGATIVE" if is_neg else "POSITIVE"
+                            except GoogleAdsException as gex:
+                                LOGGER.warning(f"Error querying ad group keywords: {gex}")
 
             else:
-                # Query keywords (positive)
-                if ad_group_col and ad_group_col in df.columns:
-                    ad_groups = df[ad_group_col].unique().tolist()
-                    for ad_group_resource in ad_groups:
-                        if not ad_group_resource:
-                            continue
-                        query = f"""
-                            SELECT
-                                ad_group_criterion.keyword.text,
-                                ad_group_criterion.keyword.match_type,
-                                ad_group_criterion.ad_group
-                            FROM ad_group_criterion
-                            WHERE ad_group_criterion.ad_group = '{ad_group_resource}'
-                                AND ad_group_criterion.negative = FALSE
-                                AND ad_group_criterion.type = 'KEYWORD'
-                        """
-                        try:
-                            response = ga_service.search(customer_id=customer_id, query=query)
-                            for row in response:
-                                term = row.ad_group_criterion.keyword.text.lower().strip()
-                                match = row.ad_group_criterion.keyword.match_type.name
-                                key = f"keyword:{ad_group_resource}:{term}:{match}"
-                                existing.add(key)
-                        except GoogleAdsException:
-                            continue
+                # Query keywords (positive) using batched queries
+                if ad_group_col and ad_group_col != "<none>" and ad_group_col in df.columns:
+                    ad_groups = [ag for ag in df[ad_group_col].unique().tolist() if ag and not pd.isna(ag)]
+                    if ad_groups:
+                        # Extract ad group IDs
+                        ad_group_ids = []
+                        for res in ad_groups:
+                            parts = str(res).split('/')
+                            if len(parts) >= 4 and parts[2] == 'adGroups':
+                                ad_group_ids.append(parts[3])
+                        
+                        # Process in batches to avoid query size limits
+                        for i in range(0, len(ad_group_ids), batch_size):
+                            batch_ids = ad_group_ids[i:i + batch_size]
+                            query = f"""
+                                SELECT
+                                    ad_group_criterion.keyword.text,
+                                    ad_group_criterion.keyword.match_type,
+                                    ad_group_criterion.ad_group,
+                                    ad_group_criterion.negative
+                                FROM ad_group_criterion
+                                WHERE ad_group.id IN ({','.join(batch_ids)})
+                                    AND ad_group_criterion.type = 'KEYWORD'
+                                    AND ad_group_criterion.status != 'REMOVED'
+                            """
+                            try:
+                                response = ga_service.search(customer_id=customer_id, query=query)
+                                for row in response:
+                                    match_raw = match_type_mapping.get(row.ad_group_criterion.keyword.match_type, "")
+                                    match = match_raw.upper().replace(" ", "_") if match_raw else str(row.ad_group_criterion.keyword.match_type)
+                                    is_neg = row.ad_group_criterion.negative
+                                    term = row.ad_group_criterion.keyword.text.lower().strip()
+                                    ad_group_resource = row.ad_group_criterion.ad_group
+                                    key = f"keyword:{ad_group_resource}:{term}:{match}"
+                                    existing[key] = "NEGATIVE" if is_neg else "POSITIVE"
+                            except GoogleAdsException as gex:
+                                LOGGER.warning(f"Error querying ad group keywords: {gex}")
 
         except Exception as ex:
             LOGGER.warning(f"Error fetching existing criteria: {ex}")
@@ -711,23 +849,31 @@ class GoogleAdsSearchTermsActions:
             return response.results[0].resource_name
 
     def _build_preview_message(
-        self, search_term: str, action_name: str, match_type: str, is_campaign_level: bool
+        self, search_term: str, action_name: str, match_type: str, is_campaign_level: bool,
+        campaign_name: str = "", ad_group_name: str = ""
     ) -> str:
         """Build a preview message for the audit log."""
         if action_name == "ADD_NEGATIVE_CAMPAIGN":
-            return f"Will add '{search_term}' as {match_type} campaign negative"
+            location = f"to campaign '{campaign_name}'" if campaign_name else "as campaign negative"
+            return f"Will add '{search_term}' as {match_type} negative {location}"
         elif action_name == "ADD_NEGATIVE_ADGROUP":
-            return f"Will add '{search_term}' as {match_type} ad group negative"
+            location = f"to ad group '{ad_group_name}'" if ad_group_name else "as ad group negative"
+            return f"Will add '{search_term}' as {match_type} negative {location}"
         else:
-            return f"Will promote '{search_term}' as {match_type} keyword"
+            location = f"to ad group '{ad_group_name}'" if ad_group_name else "as keyword"
+            return f"Will promote '{search_term}' as {match_type} keyword {location}"
 
     def _build_success_message(
-        self, search_term: str, action_name: str, match_type: str, is_campaign_level: bool
+        self, search_term: str, action_name: str, match_type: str, is_campaign_level: bool,
+        campaign_name: str = "", ad_group_name: str = ""
     ) -> str:
         """Build a success message for the audit log."""
         if action_name == "ADD_NEGATIVE_CAMPAIGN":
-            return f"Added '{search_term}' as {match_type} campaign negative"
+            location = f"to campaign '{campaign_name}'" if campaign_name else "as campaign negative"
+            return f"Added '{search_term}' as {match_type} negative {location}"
         elif action_name == "ADD_NEGATIVE_ADGROUP":
-            return f"Added '{search_term}' as {match_type} ad group negative"
+            location = f"to ad group '{ad_group_name}'" if ad_group_name else "as ad group negative"
+            return f"Added '{search_term}' as {match_type} negative {location}"
         else:
-            return f"Promoted '{search_term}' as {match_type} keyword"
+            location = f"to ad group '{ad_group_name}'" if ad_group_name else "as keyword"
+            return f"Promoted '{search_term}' as {match_type} keyword {location}"
