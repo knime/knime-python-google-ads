@@ -5,8 +5,8 @@ platforms = ["win-64", "linux-64", "osx-64", "osx-arm64"]
 [tasks]
 
 [dependencies]
-python = "3.11.*"
-knime-python-versions = "5.8.*"
+python = "*"
+knime-python-versions = "5.10.*"
 knime-extension = "*"
 google-ads = ">=28.0.0"
 google-api-python-client = "*"
@@ -18,8 +18,8 @@ ruff = ">=0.13.2,<0.14"
 google-ads-mcp = ">=0.0.1"
 
 [feature.build.dependencies]
-python = "3.9.*"
-knime-extension-bundling = "5.9.*"
+python = "3.13.*"
+knime-extension-bundling = "5.10.*"
 jake = "*"
 
 [feature.build.tasks]
