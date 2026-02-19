@@ -139,7 +139,7 @@ def call_mcp_tool(tool_name, parameters, connection):
 @knext.node(
     name="Google Ads MCP Tool Executor (Labs)",
     node_type=knext.NodeType.MANIPULATOR,
-    icon_path="icons/gads-icon.png",
+    icon_path="icons/Execute-the-tools.png",
     category="Google Ads",
     keywords=["Google", "Google Ads", "MCP", "Tools", "Execute", "Execution"],
     is_hidden=False,

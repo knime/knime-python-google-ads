@@ -269,7 +269,7 @@ class BudgetAdjustment:
 @knext.node(
     name="Google Ads Budget Updater (Labs)",
     node_type=knext.NodeType.MANIPULATOR,
-    icon_path="icons/gads-icon.png",
+    icon_path="icons/Update-budget.png",
     category=google_ads_ext.main_category,
     keywords=[
         "Google",

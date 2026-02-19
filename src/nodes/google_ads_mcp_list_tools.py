@@ -349,7 +349,7 @@ def get_mcp_tools_with_descriptions(connection):
 @knext.node(
     name="Google Ads MCP Tools Lister (Labs)",
     node_type=knext.NodeType.MANIPULATOR,
-    icon_path="icons/gads-icon.png",
+    icon_path="icons/List-MCP-tools.png",
     category="Google Ads",
     keywords=["Google", "Google Ads", "MCP", "Tools", "List"],
     is_hidden=False,
