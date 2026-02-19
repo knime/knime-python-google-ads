@@ -745,6 +745,15 @@ class GoogleAdsSearchTermsActions:
         # Build output DataFrame
         exec_context.set_progress(0.95, "Building results...")
         output_df = pd.DataFrame(results)
+        
+        # Preserve original input column types to avoid schema mismatch
+        # (pd.DataFrame(results) infers types, which may differ from input schema)
+        for col in df.columns:
+            if col in output_df.columns:
+                try:
+                    output_df[col] = output_df[col].astype(df[col].dtype)
+                except (ValueError, TypeError):
+                    pass  # Keep inferred type if conversion fails
 
         exec_context.set_progress(1.0, "Complete")
         return knext.Table.from_pandas(output_df)
