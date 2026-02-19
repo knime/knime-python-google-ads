@@ -71,13 +71,10 @@ def fetch_existing_criteria(
         dict: Maps conflict_key -> dict with 'type', 'level', 'location_name'
               Also includes metadata keys prefixed with '__'
     """
-    LOGGER.warning(f"fetch_existing_criteria called with scope='{scope}', customer_id='{customer_id}'")
-    LOGGER.warning(f"  shared_set_col='{shared_set_col}', campaign_col='{campaign_col}', ad_group_col='{ad_group_col}'")
     
     existing = {}
     ga_service = client.get_service("GoogleAdsService")
     match_type_mapping = field_inspector._load_enum_mapping("KeywordMatchTypeEnum.KeywordMatchType")
-    LOGGER.warning(f"Loaded match_type_mapping with {len(match_type_mapping)} entries")
     
     # Initialize metadata
     shared_set_names = {}
@@ -92,16 +89,12 @@ def fetch_existing_criteria(
             # ===============================================================
             # SHARED LIST SCOPE: Start from shared sets
             # ===============================================================
-            LOGGER.warning("Processing shared_list scope")
             if not shared_set_col or shared_set_col not in df.columns:
-                LOGGER.warning(f"shared_set_col '{shared_set_col}' not found in DataFrame columns: {list(df.columns)}")
                 return _finalize_result(existing, shared_set_names, campaign_names, ad_group_names,
                                        campaign_resource_to_id, ad_group_resource_to_id, ad_group_to_campaign)
             
             shared_sets = [s for s in df[shared_set_col].unique().tolist() if s and not pd.isna(s)]
-            LOGGER.warning(f"Found {len(shared_sets)} unique shared sets in column '{shared_set_col}': {shared_sets}")
             if not shared_sets:
-                LOGGER.warning("No valid shared sets found in DataFrame")
                 return _finalize_result(existing, shared_set_names, campaign_names, ad_group_names,
                                        campaign_resource_to_id, ad_group_resource_to_id, ad_group_to_campaign)
             
@@ -112,11 +105,9 @@ def fetch_existing_criteria(
                 if len(parts) >= 4 and parts[2] == 'sharedSets':
                     shared_set_ids.append(parts[3])
                 else:
-                    LOGGER.warning(f"Could not parse shared set resource name: '{res}' (parts={parts})")
+                    LOGGER.debug(f"Could not parse shared set resource name: '{res}' (parts={parts})")
             
-            LOGGER.warning(f"Extracted {len(shared_set_ids)} shared set IDs: {shared_set_ids}")
             if not shared_set_ids:
-                LOGGER.warning("No valid shared set IDs could be extracted from resource names")
                 return _finalize_result(existing, shared_set_names, campaign_names, ad_group_names,
                                        campaign_resource_to_id, ad_group_resource_to_id, ad_group_to_campaign)
             
@@ -131,11 +122,9 @@ def fetch_existing_criteria(
             linked_campaigns = _fetch_linked_campaigns_from_shared_sets(
                 ga_service, customer_id, shared_set_ids, batch_size
             )
-            LOGGER.warning(f"Found {len(linked_campaigns)} campaigns linked to the shared sets")
             
             if linked_campaigns:
                 campaign_ids = list(linked_campaigns.keys())
-                LOGGER.warning(f"Linked campaign IDs: {campaign_ids}")
                 
                 # Get campaign keywords (keyed by shared set)
                 _fetch_campaign_keywords_for_shared_list_scope(
@@ -153,16 +142,13 @@ def fetch_existing_criteria(
             # ===============================================================
             # CAMPAIGN/AD_GROUP/KEYWORD SCOPE: Start from campaigns
             # ===============================================================
-            LOGGER.warning(f"Processing {scope} scope")
             campaigns = []
             if campaign_col and campaign_col in df.columns:
                 campaigns = [c for c in df[campaign_col].unique().tolist() if c]
-            LOGGER.warning(f"Found {len(campaigns)} unique campaigns")
             
             ad_groups = []
             if ad_group_col and ad_group_col in df.columns:
                 ad_groups = [ag for ag in df[ad_group_col].unique().tolist() if ag and not pd.isna(ag)]
-            LOGGER.warning(f"Found {len(ad_groups)} unique ad groups")
             
             # Extract campaign IDs
             campaign_ids = []
@@ -217,9 +203,8 @@ def fetch_existing_criteria(
                 )
     
     except Exception as ex:
-        LOGGER.warning(f"Error fetching existing criteria: {ex}", exc_info=True)
+        LOGGER.debug(f"Error fetching existing criteria: {ex}", exc_info=True)
     
-    LOGGER.warning(f"fetch_existing_criteria returning {len(existing)} criteria entries")
     return _finalize_result(existing, shared_set_names, campaign_names, ad_group_names,
                            campaign_resource_to_id, ad_group_resource_to_id, ad_group_to_campaign)
 
@@ -247,10 +232,8 @@ def _fetch_shared_list_keywords(
     key_prefix: str = "sharedlist"
 ):
     """Fetch keywords from shared lists."""
-    LOGGER.warning(f"_fetch_shared_list_keywords: Fetching keywords from {len(shared_set_ids)} shared sets")
     for i in range(0, len(shared_set_ids), batch_size):
         batch_ids = shared_set_ids[i:i + batch_size]
-        LOGGER.warning(f"  Batch {i//batch_size + 1}: querying shared_set IDs {batch_ids}")
         query = f"""
             SELECT
                 shared_criterion.keyword.text,
@@ -276,22 +259,20 @@ def _fetch_shared_list_keywords(
                     'level': 'SHARED_LIST',
                     'location_name': row.shared_set.name
                 }
-                LOGGER.warning(f"    Found shared list keyword: '{term}' ({match}) in '{row.shared_set.name}'")
+                LOGGER.debug(f"    Found shared list keyword: '{term}' ({match}) in '{row.shared_set.name}'")
         except GoogleAdsException as gex:
-            LOGGER.warning(f"Error querying shared criteria: {gex.failure.errors if hasattr(gex, 'failure') else gex}")
-            LOGGER.warning(f"  Query was: {query}")
+            LOGGER.debug(f"Error querying shared criteria: {gex.failure.errors if hasattr(gex, 'failure') else gex}")
+            LOGGER.debug(f"  Query was: {query}")
 
 
 def _fetch_linked_campaigns_from_shared_sets(
     ga_service, customer_id: str, shared_set_ids: list, batch_size: int
 ) -> dict:
     """Find campaigns linked to shared sets."""
-    LOGGER.warning(f"_fetch_linked_campaigns_from_shared_sets: Finding campaigns for {len(shared_set_ids)} shared sets")
     linked_campaigns = {}  # campaign_id -> {'name': str, 'shared_sets': set}
     
     for i in range(0, len(shared_set_ids), batch_size):
         batch_ids = shared_set_ids[i:i + batch_size]
-        LOGGER.warning(f"  Batch {i//batch_size + 1}: querying shared_set IDs {batch_ids}")
         query = f"""
             SELECT
                 campaign.id,
@@ -308,12 +289,11 @@ def _fetch_linked_campaigns_from_shared_sets(
                 if camp_id not in linked_campaigns:
                     linked_campaigns[camp_id] = {'name': row.campaign.name, 'shared_sets': set()}
                 linked_campaigns[camp_id]['shared_sets'].add(row.campaign_shared_set.shared_set)
-                LOGGER.warning(f"    Campaign '{row.campaign.name}' (ID: {camp_id}) linked to shared set")
+                LOGGER.debug(f"    Campaign '{row.campaign.name}' (ID: {camp_id}) linked to shared set")
         except GoogleAdsException as gex:
-            LOGGER.warning(f"Error querying campaign_shared_set: {gex.failure.errors if hasattr(gex, 'failure') else gex}")
-            LOGGER.warning(f"  Query was: {query}")
+            LOGGER.debug(f"Error querying campaign_shared_set: {gex.failure.errors if hasattr(gex, 'failure') else gex}")
+            LOGGER.debug(f"  Query was: {query}")
     
-    LOGGER.warning(f"_fetch_linked_campaigns_from_shared_sets: Found {len(linked_campaigns)} linked campaigns")
     return linked_campaigns
 
 
@@ -322,7 +302,6 @@ def _fetch_campaign_keywords_for_shared_list_scope(
     match_type_mapping: dict, existing: dict, linked_campaigns: dict
 ):
     """Fetch campaign keywords, keyed by shared set resource."""
-    LOGGER.warning(f"_fetch_campaign_keywords_for_shared_list_scope: Fetching from {len(campaign_ids)} campaigns")
     for i in range(0, len(campaign_ids), batch_size):
         batch_ids = campaign_ids[i:i + batch_size]
         query = f"""
@@ -356,8 +335,8 @@ def _fetch_campaign_keywords_for_shared_list_scope(
                             'location_name': row.campaign.name
                         }
         except GoogleAdsException as gex:
-            LOGGER.warning(f"Error querying campaign keywords: {gex.failure.errors if hasattr(gex, 'failure') else gex}")
-            LOGGER.warning(f"  Query was: {query}")
+            LOGGER.debug(f"Error querying campaign keywords: {gex.failure.errors if hasattr(gex, 'failure') else gex}")
+            LOGGER.debug(f"  Query was: {query}")
 
 
 def _fetch_adgroup_keywords_for_shared_list_scope(
@@ -365,7 +344,6 @@ def _fetch_adgroup_keywords_for_shared_list_scope(
     match_type_mapping: dict, existing: dict, linked_campaigns: dict
 ):
     """Fetch ad group keywords, keyed by shared set resource."""
-    LOGGER.warning(f"_fetch_adgroup_keywords_for_shared_list_scope: Fetching from {len(campaign_ids)} campaigns")
     for i in range(0, len(campaign_ids), batch_size):
         batch_ids = campaign_ids[i:i + batch_size]
         query = f"""
@@ -399,15 +377,14 @@ def _fetch_adgroup_keywords_for_shared_list_scope(
                             'location_name': row.ad_group.name
                         }
         except GoogleAdsException as gex:
-            LOGGER.warning(f"Error querying ad group keywords: {gex.failure.errors if hasattr(gex, 'failure') else gex}")
-            LOGGER.warning(f"  Query was: {query}")
+            LOGGER.debug(f"Error querying ad group keywords: {gex.failure.errors if hasattr(gex, 'failure') else gex}")
+            LOGGER.debug(f"  Query was: {query}")
 
 
 def _fetch_shared_sets_by_campaign(
     ga_service, customer_id: str, campaign_ids: list, batch_size: int
 ) -> dict:
     """Get shared sets linked to campaigns."""
-    LOGGER.warning(f"_fetch_shared_sets_by_campaign: Finding shared sets for {len(campaign_ids)} campaigns")
     shared_sets_by_campaign = {}  # campaign_id -> [(shared_set_resource, shared_set_name)]
     
     for i in range(0, len(campaign_ids), batch_size):
@@ -429,12 +406,11 @@ def _fetch_shared_sets_by_campaign(
                 if camp_id not in shared_sets_by_campaign:
                     shared_sets_by_campaign[camp_id] = []
                 shared_sets_by_campaign[camp_id].append((row.shared_set.resource_name, row.shared_set.name))
-                LOGGER.warning(f"    Campaign {camp_id} has shared set '{row.shared_set.name}'")
+                LOGGER.debug(f"    Campaign {camp_id} has shared set '{row.shared_set.name}'")
         except GoogleAdsException as gex:
-            LOGGER.warning(f"Error querying campaign_shared_set: {gex.failure.errors if hasattr(gex, 'failure') else gex}")
-            LOGGER.warning(f"  Query was: {query}")
+            LOGGER.debug(f"Error querying campaign_shared_set: {gex.failure.errors if hasattr(gex, 'failure') else gex}")
+            LOGGER.debug(f"  Query was: {query}")
     
-    LOGGER.warning(f"_fetch_shared_sets_by_campaign: Found shared sets for {len(shared_sets_by_campaign)} campaigns")
     return shared_sets_by_campaign
 
 
@@ -443,7 +419,6 @@ def _fetch_shared_list_keywords_for_campaign_scope(
     match_type_mapping: dict, existing: dict
 ):
     """Fetch shared list keywords, keyed by campaign ID."""
-    LOGGER.warning(f"_fetch_shared_list_keywords_for_campaign_scope: Processing {len(shared_sets_by_campaign)} campaigns")
     # Collect all unique shared set IDs
     all_shared_set_ids = set()
     for camp_id, shared_sets in shared_sets_by_campaign.items():
@@ -452,9 +427,8 @@ def _fetch_shared_list_keywords_for_campaign_scope(
             if len(parts) >= 4 and parts[2] == 'sharedSets':
                 all_shared_set_ids.add(parts[3])
     
-    LOGGER.warning(f"  Found {len(all_shared_set_ids)} unique shared set IDs")
     if not all_shared_set_ids:
-        LOGGER.warning("  No shared set IDs found, returning")
+        LOGGER.debug("  No shared set IDs found, returning")
         return
     
     shared_set_ids_list = list(all_shared_set_ids)
@@ -490,8 +464,8 @@ def _fetch_shared_list_keywords_for_campaign_scope(
                                     'location_name': row.shared_set.name
                                 }
         except GoogleAdsException as gex:
-            LOGGER.warning(f"Error querying shared criteria: {gex.failure.errors if hasattr(gex, 'failure') else gex}")
-            LOGGER.warning(f"  Query was: {query}")
+            LOGGER.debug(f"Error querying shared criteria: {gex.failure.errors if hasattr(gex, 'failure') else gex}")
+            LOGGER.debug(f"  Query was: {query}")
 
 
 def _fetch_campaign_keywords(
@@ -499,7 +473,6 @@ def _fetch_campaign_keywords(
     match_type_mapping: dict, existing: dict
 ):
     """Fetch campaign keywords, keyed by campaign ID."""
-    LOGGER.warning(f"_fetch_campaign_keywords: Fetching from {len(campaign_ids)} campaigns")
     for i in range(0, len(campaign_ids), batch_size):
         batch_ids = campaign_ids[i:i + batch_size]
         query = f"""
@@ -531,8 +504,8 @@ def _fetch_campaign_keywords(
                         'location_name': row.campaign.name
                     }
         except GoogleAdsException as gex:
-            LOGGER.warning(f"Error querying campaign keywords: {gex.failure.errors if hasattr(gex, 'failure') else gex}")
-            LOGGER.warning(f"  Query was: {query}")
+            LOGGER.debug(f"Error querying campaign keywords: {gex.failure.errors if hasattr(gex, 'failure') else gex}")
+            LOGGER.debug(f"  Query was: {query}")
 
 
 def _fetch_adgroup_keywords(
@@ -540,7 +513,6 @@ def _fetch_adgroup_keywords(
     match_type_mapping: dict, existing: dict, ad_group_to_campaign: dict
 ):
     """Fetch ad group keywords, keyed by ad group ID."""
-    LOGGER.warning(f"_fetch_adgroup_keywords: Fetching from {len(ad_group_ids)} ad groups")
     for i in range(0, len(ad_group_ids), batch_size):
         batch_ids = ad_group_ids[i:i + batch_size]
         query = f"""
@@ -577,15 +549,14 @@ def _fetch_adgroup_keywords(
                         'campaign_id': camp_id
                     }
         except GoogleAdsException as gex:
-            LOGGER.warning(f"Error querying ad group keywords: {gex.failure.errors if hasattr(gex, 'failure') else gex}")
-            LOGGER.warning(f"  Query was: {query}")
+            LOGGER.debug(f"Error querying ad group keywords: {gex.failure.errors if hasattr(gex, 'failure') else gex}")
+            LOGGER.debug(f"  Query was: {query}")
 
 
 def _fetch_campaign_names(
     ga_service, customer_id: str, campaign_ids: list, batch_size: int, campaign_names: dict
 ):
     """Fetch campaign resource_name -> name mapping."""
-    LOGGER.warning(f"_fetch_campaign_names: Fetching names for {len(campaign_ids)} campaigns")
     for i in range(0, len(campaign_ids), batch_size):
         batch_ids = campaign_ids[i:i + batch_size]
         query = f"""SELECT campaign.resource_name, campaign.name FROM campaign WHERE campaign.id IN ({','.join(batch_ids)})"""
@@ -594,14 +565,13 @@ def _fetch_campaign_names(
             for row in response:
                 campaign_names[row.campaign.resource_name] = row.campaign.name
         except GoogleAdsException as gex:
-            LOGGER.warning(f"Error fetching campaign names: {gex.failure.errors if hasattr(gex, 'failure') else gex}")
+            LOGGER.debug(f"Error fetching campaign names: {gex.failure.errors if hasattr(gex, 'failure') else gex}")
 
 
 def _fetch_adgroup_names(
     ga_service, customer_id: str, ad_group_ids: list, batch_size: int, ad_group_names: dict
 ):
     """Fetch ad_group resource_name -> name mapping."""
-    LOGGER.warning(f"_fetch_adgroup_names: Fetching names for {len(ad_group_ids)} ad groups")
     for i in range(0, len(ad_group_ids), batch_size):
         batch_ids = ad_group_ids[i:i + batch_size]
         query = f"""SELECT ad_group.resource_name, ad_group.name FROM ad_group WHERE ad_group.id IN ({','.join(batch_ids)})"""
@@ -610,7 +580,7 @@ def _fetch_adgroup_names(
             for row in response:
                 ad_group_names[row.ad_group.resource_name] = row.ad_group.name
         except GoogleAdsException as gex:
-            LOGGER.warning(f"Error fetching ad group names: {gex.failure.errors if hasattr(gex, 'failure') else gex}")
+            LOGGER.debug(f"Error fetching ad group names: {gex.failure.errors if hasattr(gex, 'failure') else gex}")
 
 
 # =============================================================================
@@ -868,24 +838,16 @@ def create_criterion(
     Returns:
         str: The created criterion resource name
     """
-    LOGGER.warning(f"create_criterion called: search_term='{search_term}', match_type='{match_type}'")
-    LOGGER.warning(f"  is_shared_list={is_shared_list}, is_negative={is_negative}, is_campaign_level={is_campaign_level}")
-    LOGGER.warning(f"  customer_id='{customer_id}', manager_account_id='{manager_account_id}'")
-    LOGGER.warning(f"  shared_set_resource='{shared_set_resource}'")
-    LOGGER.warning(f"  campaign_resource='{campaign_resource}', ad_group_resource='{ad_group_resource}'")
-    
     match_type_enum = getattr(
         client.enums.KeywordMatchTypeEnum, match_type,
         client.enums.KeywordMatchTypeEnum.EXACT
     )
-    LOGGER.warning(f"  Resolved match_type_enum: {match_type_enum}")
 
     if is_shared_list:
         # Shared negative keyword list (MCC-level or account-level)
         # For MCC-owned shared lists, use manager_account_id
         # The resource name from queries shows client's ID, but mutations need owner's ID
         shared_set_owner_id = manager_account_id if manager_account_id else customer_id
-        LOGGER.warning(f"  Using customer_id='{shared_set_owner_id}' for shared list API call")
         
         # Also update the shared_set_resource to use the correct customer ID
         # Replace the customer ID in the resource name with the owner's ID
@@ -897,9 +859,7 @@ def create_criterion(
                     f"customers/{original_id}/",
                     f"customers/{manager_account_id}/"
                 )
-                LOGGER.warning(f"  Updated shared_set_resource to use MCC ID: '{shared_set_resource}'")
         
-        LOGGER.warning("  Creating shared criterion (adding to shared negative list)")
         service = client.get_service("SharedCriterionService")
         operation = client.get_type("SharedCriterionOperation")
         criterion = operation.create
@@ -907,29 +867,25 @@ def create_criterion(
         criterion.shared_set = shared_set_resource
         criterion.keyword.text = search_term
         criterion.keyword.match_type = match_type_enum
-        
-        LOGGER.warning(f"  Criterion: shared_set='{criterion.shared_set}', keyword.text='{criterion.keyword.text}', keyword.match_type={criterion.keyword.match_type}")
 
         try:
             response = service.mutate_shared_criteria(
                 customer_id=shared_set_owner_id, operations=[operation]
             )
             result = response.results[0].resource_name
-            LOGGER.warning(f"  Success! Created shared criterion: {result}")
             return result
         except GoogleAdsException as gex:
-            LOGGER.warning(f"GoogleAdsException adding to shared list: customer_id='{shared_set_owner_id}', shared_set='{shared_set_resource}', keyword='{search_term}'")
+            LOGGER.debug(f"GoogleAdsException adding to shared list: customer_id='{shared_set_owner_id}', shared_set='{shared_set_resource}', keyword='{search_term}'")
             for error in gex.failure.errors:
-                LOGGER.warning(f"  Error code: {error.error_code}")
-                LOGGER.warning(f"  Error message: {error.message}")
+                LOGGER.debug(f"  Error code: {error.error_code}")
+                LOGGER.debug(f"  Error message: {error.message}")
                 if error.location:
                     for field_path in error.location.field_path_elements:
-                        LOGGER.warning(f"  Field: {field_path.field_name}")
+                        LOGGER.debug(f"  Field: {field_path.field_name}")
             raise
 
     elif is_negative and is_campaign_level:
         # Campaign-level negative
-        LOGGER.warning("  Creating campaign-level negative keyword")
         service = client.get_service("CampaignCriterionService")
         operation = client.get_type("CampaignCriterionOperation")
         criterion = operation.create
@@ -938,26 +894,22 @@ def create_criterion(
         criterion.negative = True
         criterion.keyword.text = search_term
         criterion.keyword.match_type = match_type_enum
-        
-        LOGGER.warning(f"  Criterion: campaign='{criterion.campaign}', negative={criterion.negative}, keyword.text='{criterion.keyword.text}'")
 
         try:
             response = service.mutate_campaign_criteria(
                 customer_id=customer_id, operations=[operation]
             )
             result = response.results[0].resource_name
-            LOGGER.warning(f"  Success! Created campaign criterion: {result}")
             return result
         except GoogleAdsException as gex:
-            LOGGER.warning(f"GoogleAdsException adding campaign negative: customer_id='{customer_id}', campaign='{campaign_resource}', keyword='{search_term}'")
+            LOGGER.debug(f"GoogleAdsException adding campaign negative: customer_id='{customer_id}', campaign='{campaign_resource}', keyword='{search_term}'")
             for error in gex.failure.errors:
-                LOGGER.warning(f"  Error code: {error.error_code}")
-                LOGGER.warning(f"  Error message: {error.message}")
+                LOGGER.debug(f"  Error code: {error.error_code}")
+                LOGGER.debug(f"  Error message: {error.message}")
             raise
 
     elif is_negative:
         # Ad group-level negative
-        LOGGER.warning("  Creating ad group-level negative keyword")
         service = client.get_service("AdGroupCriterionService")
         operation = client.get_type("AdGroupCriterionOperation")
         criterion = operation.create
@@ -966,26 +918,23 @@ def create_criterion(
         criterion.negative = True
         criterion.keyword.text = search_term
         criterion.keyword.match_type = match_type_enum
-        
-        LOGGER.warning(f"  Criterion: ad_group='{criterion.ad_group}', negative={criterion.negative}, keyword.text='{criterion.keyword.text}'")
 
         try:
             response = service.mutate_ad_group_criteria(
                 customer_id=customer_id, operations=[operation]
             )
             result = response.results[0].resource_name
-            LOGGER.warning(f"  Success! Created ad group negative criterion: {result}")
+            LOGGER.debug(f"  Success! Created ad group negative criterion: {result}")
             return result
         except GoogleAdsException as gex:
-            LOGGER.warning(f"GoogleAdsException adding ad group negative: customer_id='{customer_id}', ad_group='{ad_group_resource}', keyword='{search_term}'")
+            LOGGER.debug(f"GoogleAdsException adding ad group negative: customer_id='{customer_id}', ad_group='{ad_group_resource}', keyword='{search_term}'")
             for error in gex.failure.errors:
-                LOGGER.warning(f"  Error code: {error.error_code}")
-                LOGGER.warning(f"  Error message: {error.message}")
+                LOGGER.debug(f"  Error code: {error.error_code}")
+                LOGGER.debug(f"  Error message: {error.message}")
             raise
 
     else:
         # Positive keyword
-        LOGGER.warning("  Creating positive keyword")
         service = client.get_service("AdGroupCriterionService")
         operation = client.get_type("AdGroupCriterionOperation")
         criterion = operation.create
@@ -994,21 +943,19 @@ def create_criterion(
         criterion.status = client.enums.AdGroupCriterionStatusEnum.ENABLED
         criterion.keyword.text = search_term
         criterion.keyword.match_type = match_type_enum
-        
-        LOGGER.warning(f"  Criterion: ad_group='{criterion.ad_group}', status=ENABLED, keyword.text='{criterion.keyword.text}'")
 
         try:
             response = service.mutate_ad_group_criteria(
                 customer_id=customer_id, operations=[operation]
             )
             result = response.results[0].resource_name
-            LOGGER.warning(f"  Success! Created positive keyword criterion: {result}")
+            LOGGER.debug(f"  Success! Created positive keyword criterion: {result}")
             return result
         except GoogleAdsException as gex:
-            LOGGER.warning(f"GoogleAdsException adding positive keyword: customer_id='{customer_id}', ad_group='{ad_group_resource}', keyword='{search_term}'")
+            LOGGER.debug(f"GoogleAdsException adding positive keyword: customer_id='{customer_id}', ad_group='{ad_group_resource}', keyword='{search_term}'")
             for error in gex.failure.errors:
-                LOGGER.warning(f"  Error code: {error.error_code}")
-                LOGGER.warning(f"  Error message: {error.message}")
+                LOGGER.debug(f"  Error code: {error.error_code}")
+                LOGGER.debug(f"  Error message: {error.message}")
             raise
 
 

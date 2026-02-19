@@ -42,15 +42,6 @@
 #  when such Node is propagated with or for interoperation with KNIME.
 # ------------------------------------------------------------------------
 
-"""
-Google Ads Search Terms Actions (Labs)
-
-This node executes actions on search terms: add as negative keywords (cut wasted spend)
-or promote to keywords (scale high-intent traffic).
-
-Pure executor — all rules/filtering done upstream with KNIME nodes.
-"""
-
 import logging
 from datetime import datetime
 
@@ -163,6 +154,8 @@ class ExecutionMode(knext.EnumParameterOptions):
 
 @knext.node(
     name="Google Ads Search Terms Actions (Labs)",
+    # node_type is MANIPULATOR (not SINK) because it returns a results table
+    # even though it writes to the Google Ads API
     node_type=knext.NodeType.MANIPULATOR,
     icon_path="icons/gads-icon.png",
     category=google_ads_ext.main_category,
@@ -177,29 +170,29 @@ class ExecutionMode(knext.EnumParameterOptions):
 )
 @knext.input_port(
     "Google Ads Connection",
-    "Contains necessary tokens and credentials as well as customer ID to access the Google Ads API.",
+    "Connection containing credentials, customer ID, and optionally a Manager Account (MCC) ID to access the Google Ads API.",
     google_ad_port_type,
 )
 @knext.input_table(
-    name="Search Terms",
-    description="Table containing search terms with campaign and ad group resource names.",
+    name="Input Data",
+    description="Table containing terms and the required resource names (campaign, ad group, or shared set) depending on the selected action and scope.",
 )
 @knext.output_table(
     name="Results",
-    description="Results with status for each search term action.",
+    description="Results with status for each term action.",
 )
 class GoogleAdsSearchTermsActions:
     """
-    Executes actions on search terms: add as negative keywords or promote to keywords.
+    Executes actions on terms: add as negative keywords or promote to keywords.
 
     This node is a **pure executor** — all decision logic (rules, filtering) should be done
     upstream using KNIME nodes like Rule Engine, Row Filter, or Joiner.
 
     **Actions**
 
-    - **Add as Negative Keyword**: Block search terms from triggering ads. Can be added at
-      campaign level (blocks across all ad groups) or ad group level.
-    - **Promote to Keyword**: Add high-performing search terms as keywords to gain more control
+    - **Add as Negative Keyword**: Block terms from triggering ads. Can be added at
+      campaign level, ad group level, or to shared negative keyword lists (Account or MCC level).
+    - **Promote to Keyword**: Add high-performing terms as keywords to gain more control
       over bidding and ad relevance.
 
     **Workflow Example**
@@ -213,7 +206,7 @@ class GoogleAdsSearchTermsActions:
     **Preview Mode**
 
     Use Preview mode to review proposed changes before applying them. The output table
-    will show what would happen without making any API calls.
+    will show what would happen without making any changes to your Google Ads account.
 
     **Duplicate & Conflict Detection**
 
@@ -223,7 +216,16 @@ class GoogleAdsSearchTermsActions:
       "ALREADY_EXISTS" and skipped.
     - **Detect conflicts**: Warns when adding a negative keyword that conflicts with an 
       existing positive keyword (e.g., adding "shoes" as negative when it's already a 
-      positive keyword in an ad group).
+      positive keyword in an ad group). The action is skipped and no changes are made 
+      to your Google Ads account.
+
+    **⚠️ Shared Negative Lists (Account/MCC Level)**
+    
+    When adding negatives to **Account Shared Negative Lists** or **MCC Shared Negative Lists**, 
+    only duplicate detection within the target list is performed. Conflict detection with 
+    positive keywords at campaign/ad group level is **not** performed. This is by design: 
+    adding keywords to a shared list is a deliberate account-wide decision, and users should 
+    verify upstream that the terms do not conflict with active positive keywords in linked campaigns.
 
     **⚠️ Important: Skip Duplicate Check Option**
 
@@ -259,7 +261,7 @@ class GoogleAdsSearchTermsActions:
 
     action_type = knext.EnumParameter(
         label="Action",
-        description="Choose whether to add search terms as negative keywords or promote them to keywords.",
+        description="Choose whether to add terms as negative keywords or promote them to keywords.",
         default_value=ActionType.ADD_NEGATIVE.name,
         enum=ActionType,
         style=knext.EnumParameter.Style.VALUE_SWITCH,
@@ -309,8 +311,8 @@ class GoogleAdsSearchTermsActions:
     # ==========================================================================
 
     search_term_column = knext.ColumnParameter(
-        label="Search Term Text",
-        description="Column containing the search term text.",
+        label="Term Text",
+        description="Column containing the term text to add as keyword or negative keyword.",
         port_index=1,
         include_row_key=False,
         include_none_column=False,
@@ -353,7 +355,7 @@ class GoogleAdsSearchTermsActions:
                     "Use the 'Negative Keyword Lists' pre-built query in the Google Ads Query node to retrieve available lists.",
         port_index=1,
         include_row_key=False,
-        include_none_column=True,
+        include_none_column=False,
         column_filter=create_type_filer(knext.string()),
     ).rule(
         knext.OneOf(negative_scope, [NegativeScope.SHARED_LIST.name, NegativeScope.MCC_SHARED_LIST.name]),
@@ -428,7 +430,6 @@ class GoogleAdsSearchTermsActions:
         # Determine what columns are required based on action/scope
         is_negative = self.action_type == ActionType.ADD_NEGATIVE.name
         is_shared_list = is_negative and self.negative_scope in [NegativeScope.SHARED_LIST.name, NegativeScope.MCC_SHARED_LIST.name]
-        is_campaign_level = is_negative and self.negative_scope == NegativeScope.CAMPAIGN.name
         is_ad_group_level = is_negative and self.negative_scope == NegativeScope.AD_GROUP.name
 
         # Shared list scope requires shared set column
@@ -496,30 +497,17 @@ class GoogleAdsSearchTermsActions:
         customer_id = port_object.spec.account_id
         manager_account_id = port_object.spec.manager_account_id
         
-        LOGGER.warning("=" * 60)
-        LOGGER.warning("Google Ads Search Terms Actions - Execute Started")
-        LOGGER.warning(f"Customer ID: {customer_id}")
-        LOGGER.warning(f"Manager Account ID: {manager_account_id}")
-        LOGGER.warning(f"Action Type: {self.action_type}")
-        LOGGER.warning(f"Negative Scope: {self.negative_scope}")
-        LOGGER.warning(f"Execution Mode: {self.execution_mode}")
-        LOGGER.warning(f"Negative Match Type: {self.negative_match_type}")
-        LOGGER.warning(f"Promotion Match Type: {self.promotion_match_type}")
-        LOGGER.warning("=" * 60)
-
         # Create FieldInspector for enum handling
         field_inspector = FieldInspector(client, client.enums)
 
         # Convert input to DataFrame
         df = input_table.to_pandas()
-        LOGGER.warning(f"Input DataFrame: {len(df)} rows, columns: {list(df.columns)}")
 
         # Get column names
         search_term_col = self.search_term_column
         campaign_col = self.campaign_resource_column
         ad_group_col = self.ad_group_resource_column
         shared_set_col = self.shared_set_resource_column
-        LOGGER.warning(f"Column mapping: search_term='{search_term_col}', campaign='{campaign_col}', ad_group='{ad_group_col}', shared_set='{shared_set_col}'")
 
         # Determine action details
         is_negative = self.action_type == ActionType.ADD_NEGATIVE.name
@@ -527,8 +515,6 @@ class GoogleAdsSearchTermsActions:
         is_ad_group_level = is_negative and self.negative_scope == NegativeScope.AD_GROUP.name
         is_shared_list = is_negative and self.negative_scope in [NegativeScope.SHARED_LIST.name, NegativeScope.MCC_SHARED_LIST.name]
         is_mcc_shared_list = is_negative and self.negative_scope == NegativeScope.MCC_SHARED_LIST.name
-        LOGGER.warning(f"Action flags: is_negative={is_negative}, is_campaign_level={is_campaign_level}, is_ad_group_level={is_ad_group_level}, is_shared_list={is_shared_list}")
-        LOGGER.warning(f"Is MCC Shared List: {is_mcc_shared_list}")
 
         if is_negative:
             if is_shared_list:
@@ -550,7 +536,7 @@ class GoogleAdsSearchTermsActions:
         ad_group_names = {}
         
         if self.skip_duplicate_check:
-            LOGGER.warning("Skipping duplicate/conflict check (skip_duplicate_check=True)")
+            LOGGER.debug("Skipping duplicate/conflict check (skip_duplicate_check=True)")
         else:
             exec_context.set_progress(0.1, "Checking for existing keywords/negatives...")
             if is_shared_list:
@@ -571,7 +557,7 @@ class GoogleAdsSearchTermsActions:
             
             # Count actual criteria (exclude metadata keys that start with __)
             criteria_count = sum(1 for k in existing_criteria if not k.startswith('__'))
-            LOGGER.warning(f"Fetched {criteria_count} existing criteria for conflict detection")
+            LOGGER.debug(f"Fetched {criteria_count} existing criteria for conflict detection")
 
         # Process each row
         exec_context.set_progress(0.3, "Processing search terms...")
@@ -592,14 +578,12 @@ class GoogleAdsSearchTermsActions:
                 shared_set_resource = str(row[shared_set_col]) if shared_set_col and shared_set_col in df.columns and pd.notna(row[shared_set_col]) else ""
                 campaign_resource = ""
                 ad_group_resource = ""
-                LOGGER.warning(f"Row {row_num}: search_term='{search_term}', shared_set_resource='{shared_set_resource}'")
             else:
                 shared_set_resource = ""
                 campaign_resource = str(row[campaign_col]) if campaign_col and campaign_col in df.columns and pd.notna(row[campaign_col]) else ""
                 ad_group_resource = ""
                 if ad_group_col and ad_group_col in df.columns:
                     ad_group_resource = str(row[ad_group_col]) if pd.notna(row[ad_group_col]) else ""
-                LOGGER.warning(f"Row {row_num}: search_term='{search_term}', campaign='{campaign_resource}', ad_group='{ad_group_resource}'")
 
             # Start with all input columns, then add result columns
             result = row.to_dict()
@@ -628,14 +612,12 @@ class GoogleAdsSearchTermsActions:
                 if not shared_set_resource:
                     result["Status"] = "FAILED"
                     result["Message"] = "Shared set resource name is empty"
-                    LOGGER.warning(f"Row {row_num}: Shared set resource name is empty for search_term='{search_term}'")
                     results.append(result)
                     continue
             else:
                 if not campaign_resource:
                     result["Status"] = "FAILED"
                     result["Message"] = "Campaign resource name is empty"
-                    LOGGER.warning(f"Row {row_num}: Campaign resource name is empty for search_term='{search_term}'")
                     results.append(result)
                     continue
 
@@ -643,7 +625,6 @@ class GoogleAdsSearchTermsActions:
                     if not ad_group_resource:
                         result["Status"] = "FAILED"
                         result["Message"] = "Ad group resource name required for this action"
-                        LOGGER.warning(f"Row {row_num}: Ad group resource name is empty for search_term='{search_term}'")
                         results.append(result)
                         continue
 
@@ -743,17 +724,17 @@ class GoogleAdsSearchTermsActions:
                 error_msg = ex.failure.errors[0].message if ex.failure.errors else str(ex)
                 result["Status"] = "FAILED"
                 result["Message"] = f"API error: {error_msg}"
-                LOGGER.warning(f"GoogleAdsException for search_term='{search_term}': {error_msg}")
+                LOGGER.debug(f"GoogleAdsException for search_term='{search_term}': {error_msg}")
                 for error in ex.failure.errors:
-                    LOGGER.warning(f"  Error code: {error.error_code}")
-                    LOGGER.warning(f"  Error message: {error.message}")
+                    LOGGER.debug(f"  Error code: {error.error_code}")
+                    LOGGER.debug(f"  Error message: {error.message}")
                     if hasattr(error, 'trigger') and error.trigger:
-                        LOGGER.warning(f"  Trigger: {error.trigger.string_value if hasattr(error.trigger, 'string_value') else error.trigger}")
+                        LOGGER.debug(f"  Trigger: {error.trigger.string_value if hasattr(error.trigger, 'string_value') else error.trigger}")
 
             except Exception as ex:
                 result["Status"] = "FAILED"
                 result["Message"] = f"Unexpected error: {str(ex)}"
-                LOGGER.warning(f"Unexpected exception for search_term='{search_term}': {ex}", exc_info=True)
+                LOGGER.debug(f"Unexpected exception for search_term='{search_term}': {ex}", exc_info=True)
 
             results.append(result)
 
