@@ -157,7 +157,7 @@ class ExecutionMode(knext.EnumParameterOptions):
     # node_type is MANIPULATOR (not SINK) because it returns a results table
     # even though it writes to the Google Ads API
     node_type=knext.NodeType.MANIPULATOR,
-    icon_path="icons/gads-icon.png",
+    icon_path="icons/Add-negative-promote-terms-as-keywords.png",
     category=google_ads_ext.main_category,
     keywords=[
         "Google",
@@ -358,7 +358,10 @@ class GoogleAdsSearchTermsActions:
         include_none_column=False,
         column_filter=create_type_filer(knext.string()),
     ).rule(
-        knext.OneOf(negative_scope, [NegativeScope.SHARED_LIST.name, NegativeScope.MCC_SHARED_LIST.name]),
+        knext.And(
+            knext.OneOf(action_type, [ActionType.ADD_NEGATIVE.name]),
+            knext.OneOf(negative_scope, [NegativeScope.SHARED_LIST.name, NegativeScope.MCC_SHARED_LIST.name]),
+        ),
         knext.Effect.SHOW,
     )
 
@@ -462,8 +465,8 @@ class GoogleAdsSearchTermsActions:
             check_column(input_table_schema, ad_group_col, knext.string(), "ad group resource name")
 
         # Define output schema: input columns + result columns
-        # Start with input columns
-        output_columns = list(input_table_schema)
+        # Start with input columns (create new Column objects to ensure proper schema construction)
+        output_columns = [knext.Column(col.ktype, col.name) for col in input_table_schema]
         
         # Add result columns based on scope
         if is_shared_list:
@@ -515,6 +518,11 @@ class GoogleAdsSearchTermsActions:
         is_ad_group_level = is_negative and self.negative_scope == NegativeScope.AD_GROUP.name
         is_shared_list = is_negative and self.negative_scope in [NegativeScope.SHARED_LIST.name, NegativeScope.MCC_SHARED_LIST.name]
         is_mcc_shared_list = is_negative and self.negative_scope == NegativeScope.MCC_SHARED_LIST.name
+        # Must match configure() logic for schema consistency
+        requires_ad_group = (
+            self.action_type == ActionType.PROMOTE_TO_KEYWORD.name
+            or is_ad_group_level
+        )
 
         if is_negative:
             if is_shared_list:
@@ -528,34 +536,30 @@ class GoogleAdsSearchTermsActions:
             action_name = "PROMOTE_TO_KEYWORD"
             match_type = self.promotion_match_type
 
-        # Get existing criteria for conflict detection (also fetches names)
-        # Skip if user opted out for performance
-        existing_criteria = {}
-        shared_set_names = {}
-        campaign_names = {}
-        ad_group_names = {}
+        # Fetch existing criteria (always needed for names, optionally for conflict detection)
+        exec_context.set_progress(0.1, "Fetching existing keywords...")
+        if is_shared_list:
+            existing_criteria = fetch_existing_criteria(
+                client, customer_id, df, field_inspector, self.batch_size,
+                shared_set_col=shared_set_col, scope="shared_list"
+            )
+        else:
+            scope = "campaign" if is_campaign_level else "ad_group"
+            existing_criteria = fetch_existing_criteria(
+                client, customer_id, df, field_inspector, self.batch_size,
+                campaign_col=campaign_col, ad_group_col=ad_group_col, scope=scope
+            )
         
+        # Extract name mappings
+        shared_set_names = existing_criteria.pop('__shared_set_names__', {})
+        campaign_names = existing_criteria.pop('__campaign_names__', {})
+        ad_group_names = existing_criteria.pop('__ad_group_names__', {})
+        
+        # If skip_duplicate_check, we only use the names, not the conflict data
         if self.skip_duplicate_check:
             LOGGER.debug("Skipping duplicate/conflict check (skip_duplicate_check=True)")
+            existing_criteria = {}  # Clear criteria so no conflict checks happen
         else:
-            exec_context.set_progress(0.1, "Checking for existing keywords/negatives...")
-            if is_shared_list:
-                existing_criteria = fetch_existing_criteria(
-                    client, customer_id, df, field_inspector, self.batch_size,
-                    shared_set_col=shared_set_col, scope="shared_list"
-                )
-            else:
-                scope = "campaign" if is_campaign_level else "ad_group"
-                existing_criteria = fetch_existing_criteria(
-                    client, customer_id, df, field_inspector, self.batch_size,
-                    campaign_col=campaign_col, ad_group_col=ad_group_col, scope=scope
-                )
-            # Extract name mappings from existing_criteria
-            shared_set_names = existing_criteria.pop('__shared_set_names__', {})
-            campaign_names = existing_criteria.pop('__campaign_names__', {})
-            ad_group_names = existing_criteria.pop('__ad_group_names__', {})
-            
-            # Count actual criteria (exclude metadata keys that start with __)
             criteria_count = sum(1 for k in existing_criteria if not k.startswith('__'))
             LOGGER.debug(f"Fetched {criteria_count} existing criteria for conflict detection")
 
@@ -588,12 +592,12 @@ class GoogleAdsSearchTermsActions:
             # Start with all input columns, then add result columns
             result = row.to_dict()
             
-            # Add human-readable names from API based on scope
+            # Add human-readable names from API based on scope (must match configure() logic)
             if is_shared_list:
                 result["Shared Set Name"] = shared_set_names.get(shared_set_resource, "")
             else:
                 result["Campaign Name"] = campaign_names.get(campaign_resource, "")
-                if not is_campaign_level:
+                if requires_ad_group:
                     result["Ad Group Name"] = ad_group_names.get(ad_group_resource, "")
             
             result["Match Type"] = match_type
