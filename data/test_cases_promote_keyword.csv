@@ -1,0 +1,11 @@
+test_id,test_description,action_type,execution_mode,promotion_match_type,search_term,campaign_resource,ad_group_resource,expected_status,expected_message
+1,Promote New Keyword - Preview EXACT,PROMOTE_TO_KEYWORD,PREVIEW,EXACT,t260219_promo_001,customers/4947372993/campaigns/16781816808,customers/4947372993/adGroups/134873782963,PREVIEW,Will promote
+2,Promote New Keyword - Apply EXACT,PROMOTE_TO_KEYWORD,APPLY,EXACT,t260219_promo_002,customers/4947372993/campaigns/16781816808,customers/4947372993/adGroups/134873782963,SUCCESS,Promoted
+3,Promote New Keyword - Preview PHRASE,PROMOTE_TO_KEYWORD,PREVIEW,PHRASE,t260219_promo_003,customers/4947372993/campaigns/16781816808,customers/4947372993/adGroups/134873782963,PREVIEW,Will promote
+4,Promote New Keyword - Apply PHRASE,PROMOTE_TO_KEYWORD,APPLY,PHRASE,t260219_promo_004,customers/4947372993/campaigns/16781816808,customers/4947372993/adGroups/134873782963,SUCCESS,Promoted
+5,Promote New Keyword - Preview BROAD,PROMOTE_TO_KEYWORD,PREVIEW,BROAD,t260219_promo_005,customers/4947372993/campaigns/16781816808,customers/4947372993/adGroups/134873782963,PREVIEW,Will promote
+6,Promote New Keyword - Apply BROAD,PROMOTE_TO_KEYWORD,APPLY,BROAD,t260219_promo_006,customers/4947372993/campaigns/16781816808,customers/4947372993/adGroups/134873782963,SUCCESS,Promoted
+7,Duplicate Keyword hola - Preview,PROMOTE_TO_KEYWORD,PREVIEW,EXACT,hola,customers/4947372993/campaigns/16781816808,customers/4947372993/adGroups/134873782963,ALREADY_EXISTS,Already exists
+8,Duplicate Keyword hola - Apply,PROMOTE_TO_KEYWORD,APPLY,EXACT,hola,customers/4947372993/campaigns/16781816808,customers/4947372993/adGroups/134873782963,ALREADY_EXISTS,Already exists
+9,Duplicate Keyword mojito - Preview,PROMOTE_TO_KEYWORD,PREVIEW,EXACT,mojito,customers/4947372993/campaigns/16781816808,customers/4947372993/adGroups/134873782963,ALREADY_EXISTS,Already exists
+10,Duplicate Keyword mojito - Apply,PROMOTE_TO_KEYWORD,APPLY,EXACT,mojito,customers/4947372993/campaigns/16781816808,customers/4947372993/adGroups/134873782963,ALREADY_EXISTS,Already exists
