@@ -224,6 +224,7 @@ class GoogleAdsConnector:
             GoogleAdObjectSpec(
                 account_id=cleanup_ids(self.account_id),
                 campaign_ids=campaign_ids,
+                manager_account_id=cleanup_ids(self.manager_customer_id),
             ),
             client=client,
         )

@@ -51,10 +51,11 @@ LOGGER = logging.getLogger(__name__)
 
 
 class GoogleAdObjectSpec(knext.PortObjectSpec):
-    def __init__(self, account_id: str, campaign_ids: list[str]) -> None:
+    def __init__(self, account_id: str, campaign_ids: list[str], manager_account_id: str = "") -> None:
         super().__init__()
         self._account_id = account_id
         self._campaign_ids = campaign_ids
+        self._manager_account_id = manager_account_id
 
     @property
     def account_id(self) -> str:
@@ -63,13 +64,27 @@ class GoogleAdObjectSpec(knext.PortObjectSpec):
     @property
     def campaign_ids(self) -> list[str]:
         return self._campaign_ids
+    
+    @property
+    def manager_account_id(self) -> str:
+        return self._manager_account_id
 
     def serialize(self) -> dict:
-        return {"account_id": self._account_id, "campaign_ids": self._campaign_ids}
+        return {
+            "account_id": self._account_id,
+            "campaign_ids": self._campaign_ids,
+            "manager_account_id": self._manager_account_id
+        }
 
     @classmethod
     def deserialize(cls, data: dict) -> "GoogleAdObjectSpec":
-        return cls(data["account_id"], data["campaign_ids"])
+        # Use .get() for manager_account_id to handle workflows saved before this field existed.
+        # Old serialized data won't have this key, so default to empty string.
+        return cls(
+            data["account_id"],
+            data["campaign_ids"],
+            data.get("manager_account_id", "")
+        )
 
 
 #
