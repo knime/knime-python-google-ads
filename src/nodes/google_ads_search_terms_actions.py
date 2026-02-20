@@ -424,7 +424,7 @@ class GoogleAdsSearchTermsActions:
 
         if not search_term_col:
             raise knext.InvalidParametersError(
-                "Select a column for 'Search Term Text'."
+                "Select a column for 'Term Text'."
             )
 
         check_column(input_table_schema, search_term_col, knext.string(), "search term")
