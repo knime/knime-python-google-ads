@@ -222,10 +222,9 @@ class GoogleAdsSearchTermsActions:
     **⚠️ Shared Negative Lists (Account/MCC Level)**
     
     When adding negatives to **Account Shared Negative Lists** or **MCC Shared Negative Lists**, 
-    only duplicate detection within the target list is performed. Conflict detection with 
-    positive keywords at campaign/ad group level is **not** performed. This is by design: 
-    adding keywords to a shared list is a deliberate account-wide decision, and users should 
-    verify upstream that the terms do not conflict with active positive keywords in linked campaigns.
+    the node performs full conflict detection by checking keywords in all campaigns linked to the 
+    shared list. This includes checking for conflicts with both positive and negative keywords at 
+    campaign and ad group levels.
 
     **⚠️ Important: Skip Duplicate Check Option**
 

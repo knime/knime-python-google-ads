@@ -850,15 +850,12 @@ def create_criterion(
         shared_set_owner_id = manager_account_id if manager_account_id else customer_id
         
         # Also update the shared_set_resource to use the correct customer ID
-        # Replace the customer ID in the resource name with the owner's ID
+        # Safely update only the customer ID segment in the resource name
         if manager_account_id and shared_set_resource:
             parts = shared_set_resource.split('/')
             if len(parts) >= 4 and parts[0] == 'customers':
-                original_id = parts[1]
-                shared_set_resource = shared_set_resource.replace(
-                    f"customers/{original_id}/",
-                    f"customers/{manager_account_id}/"
-                )
+                parts[1] = manager_account_id
+                shared_set_resource = '/'.join(parts)
         
         service = client.get_service("SharedCriterionService")
         operation = client.get_type("SharedCriterionOperation")
@@ -962,23 +959,6 @@ def create_criterion(
 # =============================================================================
 # MESSAGE BUILDING
 # =============================================================================
-
-
-def build_duplicate_key(
-    search_term: str, match_type: str, campaign_resource: str,
-    ad_group_resource: str, is_negative: bool, is_campaign_level: bool,
-    shared_set_resource: str = "", is_shared_list: bool = False
-) -> str:
-    """Build a unique key for duplicate detection."""
-    term_lower = search_term.lower().strip()
-    if is_shared_list:
-        return f"neg_sharedlist:{shared_set_resource}:{term_lower}:{match_type}"
-    elif is_negative and is_campaign_level:
-        return f"neg_campaign:{campaign_resource}:{term_lower}:{match_type}"
-    elif is_negative:
-        return f"neg_adgroup:{ad_group_resource}:{term_lower}:{match_type}"
-    else:
-        return f"keyword:{ad_group_resource}:{term_lower}:{match_type}"
 
 
 def build_preview_message(
