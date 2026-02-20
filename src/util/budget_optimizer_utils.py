@@ -117,7 +117,7 @@ def fetch_current_budgets(
                 }
 
         except GoogleAdsException as ex:
-            error_msg = ex.failure.errors[0].message
+            error_msg = ex.failure.errors[0].message if ex.failure.errors else str(ex)
             # Fail immediately if resource name is malformed - likely wrong column selected
             if "malformed" in error_msg.lower():
                 raise knext.InvalidParametersError(
