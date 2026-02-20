@@ -45,8 +45,8 @@
 """
 Google Ads Budget Updater (Labs)
 
-This node applies budget changes to campaigns via the Google Ads API. It is intended for scheduled and agent-driven
-execution in KNIME Hub with strict safety limits.
+This node applies budget changes to campaigns via the Google Ads API. It is a pure executor — all
+decision logic should be done upstream using standard KNIME nodes.
 """
 
 import logging
@@ -298,57 +298,61 @@ class BudgetAdjustment:
 )
 class GoogleAdsBudgetUpdater:
     """
-    Updates campaign budgets (increase or decrease) via the Google Ads API.
+    Applies budget changes to campaigns via the Google Ads API.
 
-    This node is designed for **scheduled and agent-driven execution** in KNIME Hub with strict safety limits
-    (guardrails) to prevent runaway budget changes.
+    This node is a **pure executor** — all decision logic (rules, filtering, KPI thresholds)
+    should be done upstream using KNIME nodes like Rule Engine, Row Filter, or Joiner.
 
-    **Features**
+    **Actions**
 
-    - **Campaign Budget Updates**: Increase or decrease daily budgets by a fixed amount or percentage.
-    - **Two Budget Modes**: 
-      - *Per Campaign*: Each campaign changes up to a max amount.
-      - *Total Budget*: Distribute a total budget change across all campaigns.
-    - **Distribution Strategies** (for Total Budget mode):
-      - *Equal Split*: Distribute evenly among campaigns.
-      - *Proportional to Current Budget*: Higher-budget campaigns get more.
-      - *Proportional to KPI*: Campaigns with more conversions/MQLs get more.
-    - **Shared Budget Handling**: Automatically detects when multiple campaigns share the same budget 
-      and updates it only once, preventing duplicate changes.
-    - **Preview Mode**: Review proposed changes before applying them.
-    - **Agent-Friendly Output**: Rich messages in the audit log help AI agents understand each change.
+    - **Increase Budget**: Raise campaign daily budgets by a fixed amount or percentage.
+    - **Decrease Budget**: Lower campaign daily budgets by a fixed amount or percentage.
 
-    **Configuration**
+    **Budget Modes**
 
-    1. **Column Selection**: Map your input table columns to the required fields (campaign resource, budget resource, optional KPI).
-    2. **Direction**: Choose to Increase or Decrease budgets.
-    3. **Budget Mode**: Choose Per Campaign or Total Budget distribution.
-    4. **Execution Mode**: Choose Preview to review changes or Apply to execute them.
+    - **Per Campaign**: Each campaign's budget changes individually up to a configurable max.
+    - **Across All Campaigns**: Distribute a total budget change across all campaigns using
+      equal split, proportional to current budget, or proportional to a KPI column.
+
+    **Workflow Example**
+
+    1. Use **Google Ads Query** node to fetch campaign performance data (cost, conversions, ROAS)
+    2. Join with CRM data (MQLs, opportunities, revenue) using **Joiner** node
+    3. Apply rules using **Rule Engine** to decide which campaigns need budget changes
+    4. Filter using **Row Filter** to keep only campaigns meeting your criteria
+    5. Connect to this node to execute the budget updates
+
+    **Preview Mode**
+
+    Use Preview mode to review proposed changes before applying them. The output table
+    will show what would happen without making any changes to your Google Ads account.
+
+    **Shared Budget Handling**
+
+    Google Ads allows multiple campaigns to share the same budget. The node automatically:
+
+    - **Detects shared budgets**: Identifies when multiple campaigns in your input share
+      the same budget resource.
+    - **Updates once**: Applies the change only once (via the first campaign encountered).
+    - **Tracks references**: Marks subsequent campaigns as `SHARED_REF` in the audit log.
 
     **Input Table Requirements**
 
     The input table should contain columns for:
-    - **Campaign Resource Name**: Google Ads campaign resource name (e.g., 'customers/123/campaigns/456').
-    - **Budget Resource Name**: Google Ads campaign budget resource name (e.g., 'customers/123/campaignBudgets/789').
-    - **KPI Column** (optional): Numeric column for KPI-based distribution (e.g., conversions, MQLs).
+    - **Campaign Resource Name**: e.g., 'customers/123/campaigns/456'
+    - **Budget Resource Name**: e.g., 'customers/123/campaignBudgets/789'
+    - **KPI Column** (optional): Numeric values for KPI-based distribution (conversions, MQLs, etc.)
 
-    **Shared Budgets**
+    **Safety Guardrails**
 
-    If multiple campaigns in your input share the same budget resource, the node will:
-    - Update the shared budget **only once** (via the first campaign encountered)
-    - Mark subsequent campaigns as `SHARED_REF` in the audit log
-    - Include shared budget warnings in the message column for transparency
+    - **Max per campaign**: Configurable limit on how much any single campaign's budget can change.
+    - **Preview mode**: Always review changes before applying to avoid unintended modifications.
 
-    **Tip**: Use upstream KNIME nodes (Row Filter, Rule-based Row Filter) to select which campaigns 
-    should receive budget changes based on performance metrics like cost, conversions, or ROAS.
+    **Tip: Bulk Budget Updates**
 
-    **Mandatory Upstream Node**
-
-    - Connect to the **Google Ads Connector** node to authenticate with the Google Ads API.
-
-    **Output**
-
-    - **Audit / Change Log**: Detailed log of all proposed or applied changes with agent-friendly messages.
+    This node works with any input containing valid campaign and budget resource names. You can
+    use it for bulk updates by preparing a table with your desired campaigns and connecting it
+    directly — no need for a query node if you already have the resource names.
     """
 
     # Instantiate parameter groups (defined outside the class)
