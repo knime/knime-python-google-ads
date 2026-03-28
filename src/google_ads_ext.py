@@ -66,3 +66,4 @@ import nodes.google_ads_keyword_ideas
 import nodes.google_ads_geo_targets
 import nodes.google_ads_mcp_execute_tools
 import nodes.google_ads_mcp_list_tools
+import nodes.google_ads_search_terms_actions
